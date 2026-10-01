@@ -1,14 +1,26 @@
 import { computed, ref, watch } from 'vue'
 import { defineStore } from 'pinia'
 import type {
-  Category, CheckInRecord, DB, Donation, EventPhase, Incident, IncidentType,
-  Item, ItemStatus, Match, MatchStatus, User,
+  Category, CheckInRecord, CounterpartChoiceKind, DB, Donation, EventPhase, Incident, IncidentType,
+  Item, ItemProblem, ItemStatus, Match, MatchStatus, ProblemType, User,
 } from '../types'
 import { createSeedDB } from '../seed'
 import { autoMatch, commonSlot, recommendFor, scorePair, uid } from '../utils'
 import { CATEGORY_META } from '../meta'
 
 const DB_KEY = 'swapmeet-db-v1'
+
+/** 现场问题处置动作（仅社区工作人员可依据复核结论执行） */
+export type ProblemAction =
+  | 'continue'               // 复核通过，允许继续交换
+  | 'free_exchange'          // 改为自由交换
+  | 'wait'                   // 同意等待替代物品（保留预约）
+  | 'cancel_arrived_keep'    // 取消：到场方保留时段改约 + 补偿摊位优先级
+  | 'cancel_arrived_release' // 取消：到场方释放时段转自由交换
+  | 'cancel_absent'          // 取消：双方均未到场，释放时段摊位
+  | 'take_back'              // 复核不通过，问题物品带回
+  | 'donate'                 // 社区决定转捐（校验授权与接收能力）
+  | 'mediation'              // 转人工调解（维持冻结，不改结果）
 
 function loadDB(): DB {
   try {
@@ -53,6 +65,8 @@ export const useDataStore = defineStore('data', () => {
   const freeZoneItems = computed(() => db.value.items.filter((i) => i.status === 'free_zone'))
   const reservedItems = computed(() => db.value.items.filter((i) => i.status === 'reserved'))
   const arrivedItems = computed(() => db.value.items.filter((i) => ['arrived', 'verified'].includes(i.status)))
+  /** 被实物问题冻结的物品 */
+  const frozenItems = computed(() => db.value.items.filter((i) => i.status === 'frozen'))
 
   const matchesForItem = (itemId: string) =>
     db.value.matches.filter((m) => m.itemAId === itemId || m.itemBId === itemId)
@@ -62,12 +76,48 @@ export const useDataStore = defineStore('data', () => {
   const incidentsForItem = (itemId: string) => db.value.incidents.filter((i) => i.itemId === itemId)
   const openIncidents = computed(() => db.value.incidents.filter((i) => i.status !== 'resolved'))
 
-  /** 已占用摊位 = 已确认组合的摊位 ∪ 物品身上已分配的摊位（含未到场保留摊位） */
+  /** 家长可见的异常：本人物品上报的，或本人物品作为撮合另一方被卷入的（如对方物品冻结） */
+  function incidentsForParent(userId: string) {
+    return db.value.incidents.filter((inc) => {
+      if (itemById(inc.itemId)?.parentId === userId) return true
+      if (inc.matchId) {
+        const m = matchById(inc.matchId)
+        if (m) {
+          const a = itemById(m.itemAId)
+          const b = itemById(m.itemBId)
+          return a?.parentId === userId || b?.parentId === userId
+        }
+      }
+      return false
+    })
+  }
+
+  /** 某家庭被现场退回（实物问题复核不通过）的次数 */
+  function rejectionCount(parentId: string): number {
+    return db.value.items.reduce(
+      (n, it) =>
+        n + (it.parentId === parentId ? (it.problems ?? []).filter((p) => p.staffVerdict && !p.staffVerdict.passed).length : 0),
+      0,
+    )
+  }
+  /** 多次（≥2）被退回的家庭：后续报名暂停自动撮合资格，需强化照片复核 */
+  function isAutoMatchRestricted(parentId: string): boolean {
+    const u = userById(parentId)
+    return u?.autoMatchEligible === false || rejectionCount(parentId) >= 2
+  }
+  /** 再次报名是否必须走强化照片复核与缺件说明流程 */
+  function needsEnhancedReview(item: Item): boolean {
+    return isAutoMatchRestricted(item.parentId) || !!item.enhancedReview
+  }
+
+  /** 已占用摊位 = 已确认/冻结组合的摊位 ∪ 物品身上已分配的摊位（含冻结、未到场保留摊位） */
   const boothUsed = computed(() => {
     const used = new Set<string>()
-    for (const m of db.value.matches) if (m.status === 'confirmed' && m.booth) used.add(m.booth)
+    for (const m of db.value.matches) {
+      if (['confirmed', 'frozen'].includes(m.status) && m.booth) used.add(m.booth)
+    }
     for (const i of db.value.items) {
-      if (i.booth && ['reserved', 'no_show', 'arrived', 'verified', 'exchanged', 'disputed'].includes(i.status)) {
+      if (i.booth && ['reserved', 'no_show', 'arrived', 'verified', 'exchanged', 'disputed', 'frozen'].includes(i.status)) {
         used.add(i.booth)
       }
     }
@@ -116,11 +166,17 @@ export const useDataStore = defineStore('data', () => {
     return match
   }
 
-  /** 一键智能撮合：返回生成的组合数 */
+  /** 一键智能撮合：返回生成的组合数（多次被退回、暂停自动撮合资格的家庭不参与） */
   function runAutoMatch(actor: string): number {
-    const pool = approvedPool.value
+    const pool = approvedPool.value.filter((i) => !isAutoMatchRestricted(i.parentId))
+    const skipped = approvedPool.value.length - pool.length
     const pairs = autoMatch(pool, db.value.event.boothCapacity, boothUsed.value)
     for (const p of pairs) createMatch(p.a, p.b, actor)
+    if (skipped > 0) {
+      for (const it of approvedPool.value.filter((i) => isAutoMatchRestricted(i.parentId))) {
+        pushHistory(it, '系统', '跳过自动撮合', '该家庭处于强化复核期，物品不参与本轮自动撮合（可由社区手动安排或现场自由交换）')
+      }
+    }
     return pairs.length
   }
 
@@ -136,7 +192,9 @@ export const useDataStore = defineStore('data', () => {
   function recommendationsFor(itemId: string) {
     const item = itemById(itemId)
     if (!item) return []
-    return recommendFor(item, approvedPool.value)
+    // 强化复核期家庭的物品不进入智能推荐（自动撮合），仅支持社区手动安排
+    const pool = approvedPool.value.filter((i) => !isAutoMatchRestricted(i.parentId))
+    return recommendFor(item, pool)
   }
 
   /** 家长确认/拒绝撮合 */
@@ -187,10 +245,337 @@ export const useDataStore = defineStore('data', () => {
     return n
   }
 
+  // ---------- 实物不符：冻结与撮合回滚 ----------
+
+  /** 物品是否已到场（有核销通过记录） */
+  function isOnsite(item: Item): boolean {
+    return !!item.checkIn?.passed || ['arrived', 'verified', 'exchanged'].includes(item.status)
+  }
+
+  /**
+   * 志愿者在核销页拍照标记实物问题：
+   * 冻结该物品及其关联撮合，已生成的取物凭证同步失效，生成异常交社区处置。
+   */
+  function flagItemProblem(
+    itemId: string,
+    payload: { type: ProblemType; photos: string[]; missingParts?: string; note?: string },
+    actor: string,
+  ): Incident | null {
+    const item = itemById(itemId)
+    if (!item) return null
+    const problem: ItemProblem = {
+      at: Date.now(), by: actor, type: payload.type,
+      photos: payload.photos.length ? payload.photos : ['📷'],
+      missingParts: payload.missingParts?.trim() || undefined,
+      note: payload.note?.trim() || undefined,
+    }
+    item.problems = [...(item.problems ?? []), problem]
+    item.status = 'frozen'
+    pushHistory(item, actor, '标记实物问题', problemLabel(problem))
+
+    const match = activeMatchForItem(itemId)
+    if (match) {
+      match.status = 'frozen'
+      match.problemItemId = itemId
+      const otherId = match.itemAId === itemId ? match.itemBId : match.itemAId
+      const other = itemById(otherId)
+      if (other) {
+        pushHistory(other, '系统', '撮合冻结', `对方物品「${item.name}」被标记实物问题，请在争议协调页选择处置方式`)
+      }
+    }
+    const typeLabel = { missing_parts: '缺少关键零件', photo_differs: '与报名照片差异较大', sanitation: '消毒状态无法确认' }[payload.type]
+    return reportIncident({
+      itemId,
+      matchId: match?.id,
+      type: 'item_problem',
+      title: `「${item.name}」${typeLabel}，撮合已冻结`,
+      message:
+        `${typeLabel}。${payload.missingParts ? `缺件说明：${payload.missingParts}。` : ''}` +
+        `${payload.note ? payload.note + '。' : ''}物品、关联撮合与取物凭证已冻结，请社区现场复核并协调原撮合对象选择。`,
+      by: actor, role: 'volunteer', changeItemStatus: false,
+    })
+  }
+
+  function problemLabel(p: ItemProblem): string {
+    const base = { missing_parts: '缺少关键零件', photo_differs: '与报名照片差异较大', sanitation: '消毒状态无法确认' }[p.type]
+    return p.missingParts ? `${base}：${p.missingParts}` : base
+  }
+
+  /** 社区现场复核：对照原始描述给出复核结论 */
+  function reviewProblem(incidentId: string, passed: boolean, actor: string, note?: string) {
+    const inc = db.value.incidents.find((i) => i.id === incidentId)
+    if (!inc || (inc.type !== 'item_problem' && inc.type !== 'mediation')) return
+    const item = itemById(inc.itemId)
+    if (!item || !item.problems?.length) return
+    const last = item.problems[item.problems.length - 1]
+    last.staffVerdict = { by: actor, at: Date.now(), passed, note: note?.trim() || undefined }
+    inc.status = 'processing'
+    inc.logs.push({
+      at: Date.now(), actor, role: 'staff',
+      message: `【现场复核】对照原始描述与报名照片，复核${passed ? '通过：问题可接受，允许继续交换流程' : '不通过：实物问题成立，按回滚流程处置'}${note ? `。${note}` : ''}`,
+    })
+    pushHistory(item, actor, passed ? '复核通过' : '复核不通过', note?.trim() || problemLabel(last))
+  }
+
+  /**
+   * 原撮合对象（未被冻结一方）在四个选项中作出选择。
+   * 家长的选择只是意向，最终结果由社区依据现场复核执行，任何一方不能单方面改写交换结果。
+   */
+  function counterpartChoose(matchId: string, userId: string, kind: CounterpartChoiceKind, actor: string, note?: string): boolean {
+    const match = matchById(matchId)
+    if (!match || match.status !== 'frozen' || !match.problemItemId) return false
+    const chooserId = match.itemAId === match.problemItemId ? match.itemBId : match.itemAId
+    const chooser = itemById(chooserId)
+    if (!chooser || chooser.parentId !== userId) return false
+    match.counterpartDecision = { kind, by: actor, at: Date.now(), note: note?.trim() || undefined }
+    pushHistory(chooser, actor, '选择处置方式', choiceLabel(kind))
+    const inc = db.value.incidents.find((i) => i.matchId === match.id && i.type === 'item_problem' && i.status !== 'resolved')
+    if (inc) {
+      inc.logs.push({ at: Date.now(), actor, role: 'parent', message: `原撮合对象选择「${choiceLabel(kind)}」，等待社区依据现场复核确认并执行。` })
+      inc.status = 'processing'
+    }
+    return true
+  }
+
+  function choiceLabel(kind: CounterpartChoiceKind): string {
+    return { continue: '继续交换', free_exchange: '改为自由交换', wait: '等待替代物品', cancel: '取消' }[kind]
+  }
+
+  /** 释放物品上的预约时段与摊位（凭证失效） */
+  function releaseReservation(item: Item) {
+    item.booth = undefined
+    item.entryTime = undefined
+  }
+
+  /**
+   * 社区依据现场复核与原撮合对象的选择执行处置（冻结回滚的唯一出口）。
+   * 按双方实际到场情况分别释放或保留预约时段与摊位；问题物品不会再次进入自动撮合。
+   */
+  function resolveProblem(
+    incidentId: string,
+    action: ProblemAction,
+    actor: string,
+    resolution: string,
+  ): { ok: boolean; error?: string } {
+    const inc = db.value.incidents.find((i) => i.id === incidentId)
+    if (!inc || (inc.type !== 'item_problem' && inc.type !== 'mediation')) return { ok: false, error: '未找到对应的实物问题事件' }
+    const problemItem = itemById(inc.itemId)
+    if (!problemItem || problemItem.status !== 'frozen') return { ok: false, error: '问题物品不在冻结状态' }
+    const match = inc.matchId ? matchById(inc.matchId) : undefined
+    const other = match && match.problemItemId
+      ? itemById(match.itemAId === match.problemItemId ? match.itemBId : match.itemAId)
+      : undefined
+    const lastVerdict = problemItem.problems?.[problemItem.problems.length - 1]?.staffVerdict
+
+    // 「继续交换」必须有复核通过结论，且原撮合对象明确选择继续
+    if (action === 'continue') {
+      if (!lastVerdict?.passed) return { ok: false, error: '需先完成现场复核且复核通过，才允许继续交换' }
+      if (match?.counterpartDecision?.kind !== 'continue') return { ok: false, error: '需原撮合对象选择「继续交换」' }
+      problemItem.status = 'verified'
+      problemItem.checkIn = {
+        at: Date.now(), by: actor, photoMatch: true, damage: 'minor',
+        disinfectedConfirmed: true, note: `带问题继续交换：${resolution}`, passed: true,
+      }
+      if (other && other.status === 'frozen') other.status = 'verified'
+      if (match) match.status = 'confirmed'
+      pushHistory(problemItem, actor, '继续交换', resolution)
+      if (other) pushHistory(other, actor, '关联处理', `对方物品复核通过，按现状继续交换：${resolution}`)
+      finishProblemIncident(inc, actor, resolution)
+      return { ok: true }
+    }
+
+    if (action === 'mediation') {
+      inc.type = 'mediation'
+      inc.status = 'processing'
+      inc.logs.push({ at: Date.now(), actor, role: 'staff', message: `【转人工调解】${resolution}（维持冻结，调解期间任何一方不得单独改写交换结果）` })
+      pushHistory(problemItem, actor, '转人工调解', resolution)
+      if (other) pushHistory(other, actor, '转人工调解', '双方价值/实物争议升级为人工调解，预约暂时保留')
+      return { ok: true }
+    }
+
+    if (action === 'donate') {
+      const r = communityDonate(problemItem, actor, resolution)
+      if (!r.ok) return r
+      if (other) handleCounterpartOnRollback(other!, match ?? null, actor, 'free_exchange', resolution)
+      if (match) match.status = 'failed'
+      finishProblemIncident(inc, actor, resolution)
+      return { ok: true }
+    }
+
+    if (action === 'take_back') {
+      problemItem.status = 'taken_back'
+      releaseReservation(problemItem)
+      pushHistory(problemItem, actor, '复核不通过带回', resolution)
+      applyFamilyRestriction(problemItem, actor)
+      if (other) handleCounterpartOnRollback(other!, match ?? null, actor, 'free_exchange', resolution)
+      if (match) match.status = 'failed'
+      finishProblemIncident(inc, actor, resolution)
+      return { ok: true }
+    }
+
+    if (action === 'free_exchange') {
+      // 复核不通过的问题物品不得再次进入交换（含自由交换区），须带回或转捐
+      if (lastVerdict && !lastVerdict.passed) {
+        return { ok: false, error: '该物品复核不通过，不能进入自由交换区；请选择「带回」「转捐」或「转人工调解」' }
+      }
+      problemItem.status = 'free_zone'
+      releaseReservation(problemItem)
+      pushHistory(problemItem, actor, '转自由交换区', resolution)
+      if (other) {
+        // 对方未到场：同样释放；已到场：转自由交换区但摊位释放
+        other.status = 'free_zone'
+        releaseReservation(other)
+        pushHistory(other, actor, '转自由交换区', `对方物品问题经复核可接受，组合解除：${resolution}`)
+      }
+      if (match) match.status = 'failed'
+      finishProblemIncident(inc, actor, resolution)
+      return { ok: true }
+    }
+
+    if (action === 'wait') {
+      // 保留预约时段与摊位，等待社区协调替代物品；问题物品保持冻结占位
+      pushHistory(problemItem, actor, '等待替代物品', resolution)
+      if (other) pushHistory(other, actor, '保留预约', `等待社区协调替代物品：${resolution}`)
+      inc.logs.push({ at: Date.now(), actor, role: 'staff', message: `【等待替代物品】保留摊位 ${match?.booth} 与时段 ${match?.entryTime}，由社区协调替代物品。${resolution}` })
+      inc.status = 'processing'
+      return { ok: true }
+    }
+
+    if (action === 'cancel_arrived_keep' || action === 'cancel_arrived_release' || action === 'cancel_absent') {
+      const otherOnsite = other ? isOnsite(other) : false
+      if (action === 'cancel_arrived_keep') {
+        if (!otherOnsite) return { ok: false, error: '对方未实际到场，不能按「到场保留时段」处理' }
+        if (other) {
+          other.status = 'arrived' // 已到场并保留预约资格，等待社区改约/匹配替代物品
+          const u = userById(other.parentId)
+          if (u) u.boothPriority = (u.boothPriority ?? 0) + 1
+          pushHistory(other, actor, '改约保留 + 补偿', `对方取消，保留入场时段并补偿摊位优先级（现 ${u?.boothPriority ?? 1} 级）：${resolution}`)
+        }
+        problemItem.status = 'taken_back'
+        releaseReservation(problemItem)
+        applyFamilyRestriction(problemItem, actor)
+        pushHistory(problemItem, actor, '取消并带回', resolution)
+      } else if (action === 'cancel_arrived_release') {
+        if (!otherOnsite) return { ok: false, error: '对方未实际到场，请使用「双方未到场释放」' }
+        if (other) {
+          other.status = 'free_zone'
+          releaseReservation(other)
+          pushHistory(other, actor, '取消转自由交换', `对方已到场但选择释放时段：${resolution}`)
+        }
+        problemItem.status = 'taken_back'
+        releaseReservation(problemItem)
+        applyFamilyRestriction(problemItem, actor)
+        pushHistory(problemItem, actor, '取消并带回', resolution)
+      } else {
+        // 双方均未到场：各自释放时段摊位；问题物品带回且不再撮合
+        problemItem.status = 'taken_back'
+        releaseReservation(problemItem)
+        applyFamilyRestriction(problemItem, actor)
+        pushHistory(problemItem, actor, '取消并带回', resolution)
+        if (other) {
+          other.status = 'approved'
+          releaseReservation(other)
+          pushHistory(other, actor, '组合取消', `双方均未到场，时段摊位已释放，回到待撮合池：${resolution}`)
+        }
+      }
+      if (match) {
+        match.status = 'failed'
+        match.booth = undefined
+        match.entryTime = undefined
+      }
+      finishProblemIncident(inc, actor, resolution)
+      return { ok: true }
+    }
+
+    return { ok: false, error: '不支持的处置动作' }
+  }
+
+  /** 回滚时处理未被冻结一方（按其选择与到场情况） */
+  function handleCounterpartOnRollback(other: Item, match: Match | null, actor: string, fallback: CounterpartChoiceKind, resolution: string) {
+    const choice = match?.counterpartDecision?.kind ?? fallback
+    if (choice === 'wait') {
+      other.status = isOnsite(other) ? 'arrived' : 'reserved'
+      pushHistory(other, actor, '保留预约等待替代', `摊位 ${other.booth} 时段 ${other.entryTime} 保留：${resolution}`)
+      return
+    }
+    other.status = 'free_zone'
+    releaseReservation(other)
+    pushHistory(other, actor, '转自由交换区', `问题组合解除：${resolution}`)
+  }
+
+  /** 社区决定转捐：必须同时校验家长捐赠授权与公益机构接收能力 */
+  function communityDonate(item: Item, actor: string, resolution: string): { ok: boolean; error?: string } {
+    if (!item.acceptDonation) {
+      return { ok: false, error: '家长未授权公益捐赠（报名时未勾选或后续未补充授权），不能转捐' }
+    }
+    const charity = db.value.users.find((u) => u.role === 'charity')
+    if (!charity) return { ok: false, error: '未配置公益接收机构' }
+    if ((charity.capacity ?? 0) <= 0) {
+      return { ok: false, error: `「${charity.orgName}」剩余接收能力为 0，请先扩容或协调其他机构` }
+    }
+    if (!db.value.donations.some((d) => d.itemId === item.id && d.status !== 'declined')) {
+      db.value.donations.unshift({ id: uid('d'), itemId: item.id, charityId: charity.id, status: 'requested', createdAt: Date.now() })
+    }
+    const d = db.value.donations.find((x) => x.itemId === item.id && x.status === 'requested')
+    if (d) respondDonation(d.id, true, charity.name ?? actor, resolution)
+    releaseReservation(item)
+    return { ok: true }
+  }
+
+  /** 家长在争议协调页补充捐赠授权（报名时未勾选，社区拟转捐前需要） */
+  function grantDonationAuth(itemId: string, userId: string, actor: string): boolean {
+    const item = itemById(itemId)
+    if (!item || item.parentId !== userId) return false
+    item.acceptDonation = true
+    pushHistory(item, actor, '补充捐赠授权', '同意未换出时转赠合作公益机构')
+    return true
+  }
+
+  /** 多次被退回 → 暂停该家庭后续报名的自动撮合资格 */
+  function applyFamilyRestriction(item: Item, actor: string) {
+    const parent = userById(item.parentId)
+    if (!parent) return
+    if (rejectionCount(item.parentId) >= 2 || (item.problems ?? []).filter((p) => p.staffVerdict && !p.staffVerdict.passed).length >= 2) {
+      parent.autoMatchEligible = false
+      pushHistory(item, actor, '强化复核', '该家庭物品多次现场退回，后续报名暂停自动撮合，须通过强化照片复核与缺件说明')
+    }
+  }
+
+  /** 社区对再次报名物品执行强化照片复核（须附缺件说明核对） */
+  function enhancedReviewItem(itemId: string, passed: boolean, actor: string, note?: string): boolean {
+    const item = itemById(itemId)
+    if (!item || item.status !== 'pending') return false
+    item.enhancedReview = { by: actor, at: Date.now(), passed, note: note?.trim() || undefined }
+    if (passed) {
+      item.review = { by: actor, at: Date.now(), result: 'approved', reason: `强化照片复核通过：${note ?? '照片与缺件说明齐全'}` }
+      item.status = 'approved'
+      pushHistory(item, actor, '强化复核通过', note ?? '多角度照片与缺件说明核对无误')
+    } else {
+      item.review = { by: actor, at: Date.now(), result: 'rejected', reason: `强化照片复核不通过：${note ?? '请补充零件清单与实拍照片'}` }
+      item.status = 'rejected'
+      pushHistory(item, actor, '强化复核驳回', note ?? '照片/缺件说明不足')
+    }
+    return true
+  }
+
+  /** 社区为受限家庭恢复自动撮合资格（连续无问题后） */
+  function restoreAutoMatchEligibility(parentId: string, actor: string) {
+    const u = userById(parentId)
+    if (!u) return
+    u.autoMatchEligible = true
+  }
+
+  function finishProblemIncident(inc: Incident, actor: string, resolution: string) {
+    inc.status = 'resolved'
+    inc.resolution = resolution
+    inc.logs.push({ at: Date.now(), actor, role: 'staff', message: `【处理结论】${resolution}` })
+  }
+
   // ---------- 现场核销 ----------
   function checkIn(itemId: string, record: Omit<CheckInRecord, 'at'>, actor: string): Item | null {
     const item = itemById(itemId)
     if (!item) return null
+    if (item.status === 'frozen') return null // 冻结物品须先经社区复核回滚，不能直接核销
     const rec: CheckInRecord = { ...record, at: Date.now() }
     item.checkIn = rec
     if (rec.passed) {
@@ -309,6 +694,18 @@ export const useDataStore = defineStore('data', () => {
     if (!inc || !message.trim()) return
     inc.logs.push({ at: Date.now(), actor, role, message: message.trim() })
     if (inc.status === 'open') inc.status = 'processing'
+    // 升级人工调解：冻结当前交换结果，双方物品进入争议态，调解一致办结后才恢复
+    if (message.startsWith('【转人工调解】')) {
+      const item = itemById(inc.itemId)
+      const match = inc.matchId ? matchById(inc.matchId) : activeMatchForItem(inc.itemId)
+      const pair = match ? [item, itemById(match.itemAId === inc.itemId ? match.itemBId : match.itemAId)] : [item]
+      for (const it of pair) {
+        if (it && ['verified', 'arrived', 'reserved'].includes(it.status)) {
+          it.status = 'disputed'
+          pushHistory(it, actor, '转人工调解', '交换结果暂时冻结，等待调解结论')
+        }
+      }
+    }
   }
 
   function resolveIncident(incidentId: string, actor: string, resolution: string, effects: ResolveEffects) {
@@ -396,6 +793,16 @@ export const useDataStore = defineStore('data', () => {
     const donated = all.filter((i) => i.status === 'donated')
     const takenBack = all.filter((i) => i.status === 'taken_back')
     const noExchange = all.filter((i) => i.status === 'no_exchange')
+    const frozen = all.filter((i) => i.status === 'frozen')
+    /** 强化复核期家庭（暂停自动撮合资格） */
+    const restrictedParents = db.value.users.filter(
+      (u) => u.role === 'parent' && isAutoMatchRestricted(u.id),
+    )
+    /** 现场因实物问题退回的物品数 */
+    const problemReturns = all.reduce(
+      (n, it) => n + (it.problems ?? []).filter((p) => p.staffVerdict && !p.staffVerdict.passed).length,
+      0,
+    )
 
     // 品类供需缺口（仅统计可交换品类）
     const gap = (['toy', 'book', 'clothing', 'study', 'baby'] as Category[]).map((c) => {
@@ -423,6 +830,9 @@ export const useDataStore = defineStore('data', () => {
       donated,
       takenBack,
       noExchange,
+      frozen,
+      restrictedParents,
+      problemReturns,
       gap,
     }
   })
@@ -430,11 +840,14 @@ export const useDataStore = defineStore('data', () => {
   return {
     db, event, users, items, matches, incidents, donations,
     userById, itemById, itemByCode, matchById, itemsByParent,
-    pendingItems, approvedPool, freeZoneItems, reservedItems, arrivedItems,
-    matchesForItem, activeMatchForItem, incidentsForItem, openIncidents, boothUsed,
+    pendingItems, approvedPool, freeZoneItems, reservedItems, arrivedItems, frozenItems,
+    matchesForItem, activeMatchForItem, incidentsForItem, incidentsForParent, openIncidents, boothUsed,
+    rejectionCount, isAutoMatchRestricted, needsEnhancedReview,
     submitItem, reviewItem,
     runAutoMatch, proposeFromRecommendation, recommendationsFor, respondMatch, moveUnmatchedToFreeZone,
-    checkIn, confirmExchange, onsiteFreeExchange, markNoShow, takeBack,
+    checkIn, flagItemProblem, reviewProblem, counterpartChoose, resolveProblem,
+    grantDonationAuth, enhancedReviewItem, restoreAutoMatchEligibility,
+    confirmExchange, onsiteFreeExchange, markNoShow, takeBack,
     reportIncident, addIncidentLog, resolveIncident,
     requestDonation, respondDonation,
     setPhase, resetAll, summary,

@@ -11,7 +11,7 @@ const users: User[] = [
   { id: 'u_p1', username: 'parent1', password: '123456', name: '王晓', role: 'parent', phone: '13800000001', childName: '天天', childAge: 5 },
   { id: 'u_p2', username: 'parent2', password: '123456', name: '李敏', role: 'parent', phone: '13800000002', childName: '豆豆', childAge: 7 },
   { id: 'u_p3', username: 'parent3', password: '123456', name: '张磊', role: 'parent', phone: '13800000003', childName: '果果', childAge: 3 },
-  { id: 'u_p4', username: 'parent4', password: '123456', name: '陈静', role: 'parent', phone: '13800000004', childName: '乐乐', childAge: 9 },
+  { id: 'u_p4', username: 'parent4', password: '123456', name: '陈静', role: 'parent', phone: '13800000004', childName: '乐乐', childAge: 9, autoMatchEligible: false, boothPriority: 0 },
   { id: 'u_staff', username: 'staff', password: '123456', name: '王芳', role: 'staff', phone: '13900000001' },
   { id: 'u_vol', username: 'volunteer', password: '123456', name: '赵伟', role: 'volunteer', phone: '13900000002' },
   { id: 'u_charity', username: 'charity', password: '123456', name: '刘洋', role: 'charity', orgName: '春芽公益', capacity: 19 },
@@ -37,6 +37,8 @@ interface ItemSeed {
   entryTime?: string
   review?: Item['review']
   checkIn?: Item['checkIn']
+  problems?: Item['problems']
+  enhancedReview?: Item['enhancedReview']
   history: HistoryEntry[]
 }
 
@@ -66,6 +68,8 @@ function mk(s: ItemSeed): Item {
     booth: s.booth,
     entryTime: s.entryTime,
     checkIn: s.checkIn,
+    problems: s.problems,
+    enhancedReview: s.enhancedReview,
     history: s.history,
     createdAt: s.history[0]?.at ?? now,
   }
@@ -254,6 +258,72 @@ const items: Item[] = [
     review: { by: '王芳', at: now - 25 * H, result: 'rejected', reason: '食品类物品不参与交换' },
     history: [submitted('王晓', now - 28 * H), h(now - 25 * H, '王芳', '审核驳回', '食品类物品不参与交换')],
   }),
+  // ---------- 实物不符冻结（缺件，关联撮合 m5 已冻结，对方已到场待选择） ----------
+  mk({
+    id: 'itm_024', code: 'SW-1024', parentId: 'u_p4', name: '轨道火车套装', category: 'toy', condition: 'good',
+    emoji: '🚂', disinfected: true, desired: ['book', 'study'], value: [51, 100], age: [3, 9],
+    slots: [S2, S3], donation: true, status: 'frozen', booth: 'B-05', entryTime: S2,
+    review: { by: '王芳', at: now - 24 * H, result: 'approved' },
+    problems: [
+      {
+        at: now - 0.8 * H, by: '赵伟', type: 'missing_parts', photos: ['📷'],
+        missingParts: '缺少 2 节直轨、1 个火车头遥控器，无法完整拼装运行',
+        note: '家长带到现场的套装与报名照片相比缺少关键零件',
+      },
+    ],
+    history: [
+      submitted('陈静', now - 27 * H), approvedH(now - 24 * H),
+      h(now - 16 * H, '系统', '智能撮合', '与「儿童天文学入门」配对'),
+      h(now - 9 * H, '系统', '预约成功', '摊位 B-05，入场时段 10:30-12:00'),
+      h(now - 0.8 * H, '赵伟', '标记实物问题', '缺少关键零件，物品与撮合已冻结'),
+    ],
+  }),
+  mk({
+    id: 'itm_025', code: 'SW-1025', parentId: 'u_p1', name: '儿童天文学入门', category: 'book', condition: 'like_new',
+    emoji: '🔭', disinfected: true, desired: ['toy'], value: [51, 100], age: [6, 12],
+    slots: [S2], donation: true, status: 'verified', booth: 'B-05', entryTime: S2,
+    review: { by: '王芳', at: now - 24 * H, result: 'approved' },
+    checkIn: { at: now - 0.6 * H, by: '赵伟', photoMatch: true, damage: 'none', disinfectedConfirmed: true, passed: true },
+    history: [
+      submitted('王晓', now - 29 * H), approvedH(now - 24 * H),
+      h(now - 16 * H, '系统', '智能撮合', '与「轨道火车套装」配对'),
+      h(now - 9 * H, '系统', '预约成功', '摊位 B-05，入场时段 10:30-12:00'),
+      checkedIn(now - 0.6 * H),
+      h(now - 0.8 * H, '系统', '撮合冻结', '对方物品「轨道火车套装」被标记实物问题，等待您选择处置方式'),
+    ],
+  }),
+  // ---------- 同家庭此前已两次被退回（强化复核与自动撮合限制来源） ----------
+  mk({
+    id: 'itm_026', code: 'SW-1026', parentId: 'u_p4', name: '电动机器人（返修后再次报名）', category: 'toy', condition: 'good',
+    emoji: '🤖', disinfected: true, desired: ['book'], value: [21, 50], age: [6, 12],
+    slots: [S3, S4], donation: false, status: 'pending',
+    note: '上次因缺少充电线被退回，本次已补齐并补充零件清单照片，请社区强化复核',
+    history: [submitted('陈静', now - 0.5 * H)],
+  }),
+  mk({
+    id: 'itm_027', code: 'SW-1027', parentId: 'u_p4', name: '泡泡机组合', category: 'toy', condition: 'fair',
+    emoji: '🫧', disinfected: false, desired: ['book'], value: [0, 20], age: [3, 9],
+    slots: [S1, S2], donation: false, status: 'taken_back',
+    review: { by: '王芳', at: now - 24 * H, result: 'approved' },
+    problems: [
+      {
+        at: now - 6 * H, by: '赵伟', type: 'sanitation', photos: ['📷'],
+        note: '家长申报已消毒，但瓶身有明显污渍，消毒状态无法确认',
+        staffVerdict: { by: '王芳', at: now - 5.5 * H, passed: false, note: '对照原始描述，物品确实未清洁，要求带回处理' },
+      },
+      {
+        at: now - 5 * H, by: '赵伟', type: 'photo_differs', photos: ['📷'],
+        note: '再次排队核销时发现实物为旧款，与报名照片新款差异较大',
+        staffVerdict: { by: '王芳', at: now - 4.5 * H, passed: false, note: '实物与报名描述不一致，本家庭后续报名需强化照片复核' },
+      },
+    ],
+    history: [
+      submitted('陈静', now - 26 * H), approvedH(now - 24 * H),
+      h(now - 6 * H, '赵伟', '标记实物问题', '消毒状态无法确认'),
+      h(now - 5 * H, '赵伟', '标记实物问题', '与报名照片差异较大'),
+      h(now - 4 * H, '陈静', '自行带回', '两次复核未通过，选择带回'),
+    ],
+  }),
 ]
 
 export function createSeedDB(): DB {
@@ -281,6 +351,12 @@ export function createSeedDB(): DB {
         reasons: ['双方期望品类互相契合', '价值区间接近'],
         status: 'completed', booth: 'B-03', entryTime: S1, createdAt: now - 18 * H,
       },
+      {
+        id: 'm5', itemAId: 'itm_024', itemBId: 'itm_025', score: 78,
+        reasons: ['双方期望品类互相契合', '价值区间接近', '可到场时间重合（10:30-12:00）'],
+        status: 'frozen', booth: 'B-05', entryTime: S2, problemItemId: 'itm_024',
+        createdAt: now - 16 * H,
+      },
     ],
     incidents: [
       {
@@ -302,6 +378,16 @@ export function createSeedDB(): DB {
         ],
         resolution: '确认为同款物品，色差系光线问题，物品继续参与交换流程。',
         createdBy: '赵伟', createdAt: now - 5 * H,
+      },
+      {
+        id: 'inc3', itemId: 'itm_024', matchId: 'm5', type: 'item_problem',
+        title: '轨道火车套装缺少关键零件，撮合已冻结',
+        status: 'processing',
+        logs: [
+          { at: now - 0.8 * H, actor: '赵伟', role: 'volunteer', message: '陈静带到现场的轨道火车套装缺少 2 节直轨和火车头遥控器，与报名照片差异明显，已拍照标记并冻结物品及撮合。对方（王晓）已到场核销。' },
+          { at: now - 0.5 * H, actor: '王芳', role: 'staff', message: '已联系双方到场复核，等待原撮合对象王晓选择处置方式。' },
+        ],
+        createdBy: '赵伟', createdAt: now - 0.8 * H,
       },
     ],
     donations: [

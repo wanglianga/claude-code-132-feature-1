@@ -67,9 +67,7 @@ const openIncidentCount = computed(() => data.openIncidents.length)
 const pendingCount = computed(() => data.pendingItems.length)
 const myIncidentCount = computed(() => {
   if (!auth.currentUser) return 0
-  return data.incidents.filter(
-    (i) => i.status !== 'resolved' && data.itemById(i.itemId)?.parentId === auth.currentUser!.id,
-  ).length
+  return data.incidentsForParent(auth.currentUser.id).filter((i) => i.status !== 'resolved').length
 })
 const requestedDonations = computed(
   () => data.donations.filter((d) => d.status === 'requested').length,

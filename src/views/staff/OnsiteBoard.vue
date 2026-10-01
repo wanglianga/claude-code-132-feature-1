@@ -9,7 +9,30 @@
       <div class="card stat-card"><div class="num">{{ data.reservedItems.length }}</div><div class="lbl">待到场（已预约）</div></div>
       <div class="card stat-card"><div class="num">{{ data.arrivedItems.length }}</div><div class="lbl">已到场 / 核销</div></div>
       <div class="card stat-card"><div class="num" style="color: var(--green)">{{ exchangedCount }}</div><div class="lbl">交换成功</div></div>
-      <div class="card stat-card"><div class="num" style="color: var(--red)">{{ data.summary.noShow.length }}</div><div class="lbl">未到场</div></div>
+      <div class="card stat-card">
+        <div class="num" style="color: var(--rose, #e11d63)">{{ data.frozenItems.length }}</div>
+        <div class="lbl">实物问题冻结 / 未到场 {{ data.summary.noShow.length }}</div>
+      </div>
+    </div>
+
+    <div v-if="frozenMatches.length" class="card mt16" style="border-color: var(--rose, #e11d63)">
+      <div class="card-title">🧊 冻结中的预约组合（{{ frozenMatches.length }}）</div>
+      <table class="table">
+        <thead><tr><th>摊位</th><th>问题物品</th><th>原撮合对象 / 到场</th><th>对方选择</th><th>操作</th></tr></thead>
+        <tbody>
+          <tr v-for="m in frozenMatches" :key="m.id">
+            <td><span class="badge indigo">{{ m.booth }}</span></td>
+            <td>{{ itemName(m.problemItemId ?? '') }}</td>
+            <td>
+              {{ itemName(otherId(m)) }}
+              <span class="tag">{{ otherOnsite(m) ? '已到场' : '未到场' }}</span>
+            </td>
+            <td>{{ m.counterpartDecision ? choiceLabel(m.counterpartDecision.kind) : '尚未选择' }}</td>
+            <td><router-link class="btn sm danger" to="/staff/incidents">前往复核回滚</router-link></td>
+          </tr>
+        </tbody>
+      </table>
+      <p class="small muted mt8">冻结期间取物凭证失效、摊位暂占；复核办结后按双方实际到场情况分别释放或保留时段。</p>
     </div>
 
     <div class="card mt16">
@@ -90,6 +113,7 @@ const auth = useAuthStore()
 const data = useDataStore()
 
 const confirmedMatches = computed(() => data.matches.filter((m) => m.status === 'confirmed'))
+const frozenMatches = computed(() => data.matches.filter((m) => m.status === 'frozen'))
 const exchangedCount = computed(() => data.items.filter((i) => i.status === 'exchanged').length)
 
 const freeCandidates = computed(() =>
@@ -101,6 +125,15 @@ const freeCandidatesB = computed(() => freeCandidates.value.filter((x) => x.id !
 
 function itemName(id: string) {
   return data.itemById(id)?.name ?? '未知'
+}
+function otherId(m: Match) {
+  return m.problemItemId === m.itemAId ? m.itemBId : m.itemAId
+}
+function otherOnsite(m: Match) {
+  return !!data.itemById(otherId(m))?.checkIn?.passed
+}
+function choiceLabel(kind: string) {
+  return { continue: '继续交换', free_exchange: '改为自由交换', wait: '等待替代物品', cancel: '取消' }[kind] ?? kind
 }
 function itemStatus(id: string): ItemStatus {
   return data.itemById(id)?.status ?? 'pending'

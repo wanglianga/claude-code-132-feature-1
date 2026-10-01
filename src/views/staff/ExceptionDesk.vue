@@ -1,7 +1,7 @@
 <template>
   <AppShell>
     <h2 class="page-title">异常处置台</h2>
-    <p class="page-desc">围绕同一件物品，社区、志愿者、家长与公益机构协同处理缺席、不符、反悔、争议与接收不足</p>
+    <p class="page-desc">围绕同一件物品，社区、志愿者、家长与公益机构协同处理缺席、不符、反悔、争议与接收不足；实物冻结须现场复核后回滚，任何一方不能单方面改写交换结果</p>
 
     <div class="chip-row mb16">
       <button v-for="t in tabs" :key="t.key" class="chip" :class="{ on: tab === t.key }" @click="tab = t.key">
@@ -23,6 +23,11 @@
           <StatusBadge v-if="itemOf(inc)" :status="itemOf(inc)!.status" />
         </div>
 
+        <!-- 实物问题：问题照片 / 缺件说明 / 双方到场 / 对方选择 -->
+        <template v-if="inc.type === 'item_problem' || inc.type === 'mediation'">
+          <ProblemContext :inc="inc" />
+        </template>
+
         <div class="divider" />
         <div class="log-list">
           <div v-for="(log, i) in inc.logs" :key="i" class="log-row">
@@ -35,10 +40,20 @@
         </div>
         <div v-if="inc.resolution" class="notice success mt12">✅ 处理结论：{{ inc.resolution }}</div>
 
-        <template v-if="inc.status !== 'resolved'">
+        <!-- 实物冻结 / 调解：专用处置面板 -->
+        <ProblemActions
+          v-if="inc.status !== 'resolved' && (inc.type === 'item_problem' || inc.type === 'mediation')"
+          :inc="inc"
+        />
+
+        <!-- 其他异常：原有通用处置 -->
+        <template v-else-if="inc.status !== 'resolved'">
           <div class="row mt12">
             <input v-model="drafts[inc.id]" class="input" placeholder="记录处理进展（家长与志愿者可见）……" @keyup.enter="addLog(inc)" />
             <button class="btn outline" @click="addLog(inc)">记录</button>
+          </div>
+          <div v-if="inc.type === 'value_dispute'" class="row mt12">
+            <button class="btn sm danger" @click="escalateMediation(inc)">🧑‍⚖️ 双方无法达成一致，升级人工调解（维持现状，冻结结果）</button>
           </div>
           <div class="row wrap mt12">
             <select v-model="choices[inc.id]" class="select" style="max-width: 340px">
@@ -62,6 +77,8 @@ import { computed, reactive, ref } from 'vue'
 import AppShell from '../../components/AppShell.vue'
 import EmptyState from '../../components/EmptyState.vue'
 import StatusBadge from '../../components/StatusBadge.vue'
+import ProblemContext from '../../components/ProblemContext.vue'
+import ProblemActions from '../../components/ProblemActions.vue'
 import { useAuthStore } from '../../stores/auth'
 import { useDataStore, type ResolveEffects } from '../../stores/data'
 import { INCIDENT_META, ROLE_META } from '../../meta'
@@ -90,8 +107,8 @@ const drafts = reactive<Record<string, string>>({})
 const resolutions = reactive<Record<string, string>>({})
 const choices = reactive<Record<string, number | ''>>({})
 
-/** 各异常类型可选的处理方案及其对物品/组合的状态影响 */
-const OPTIONS: Record<IncidentType, { label: string; effects: ResolveEffects }[]> = {
+/** 各异常类型可选的通用处理方案及其对物品/组合的状态影响 */
+const OPTIONS: Partial<Record<IncidentType, { label: string; effects: ResolveEffects }[]>> = {
   no_show: [
     { label: '配对物品转入自由交换区，本场交换取消', effects: { counterpartStatus: 'free_zone', matchStatus: 'failed' } },
     { label: '配对物品由家长带回', effects: { counterpartStatus: 'taken_back', matchStatus: 'failed' } },
@@ -116,7 +133,7 @@ const OPTIONS: Record<IncidentType, { label: string; effects: ResolveEffects }[]
 }
 
 function optionsOf(type: IncidentType) {
-  return OPTIONS[type]
+  return OPTIONS[type] ?? []
 }
 function itemOf(inc: Incident) {
   return data.itemById(inc.itemId)
@@ -140,12 +157,17 @@ function addLog(inc: Incident) {
   data.addIncidentLog(inc.id, auth.currentUser!.name, 'staff', msg)
   drafts[inc.id] = ''
 }
+function escalateMediation(inc: Incident) {
+  const note = prompt('记录人工调解要点（调解期间维持现状，任何一方不得单独改写交换结果）', '已约双方面对面调解')
+  if (note === null || !note.trim()) return
+  data.addIncidentLog(inc.id, auth.currentUser!.name, 'staff', `【转人工调解】${note.trim()}（冻结当前交换结果，调解达成一致后再办结）`)
+}
 function resolve(inc: Incident) {
   const idx = choices[inc.id]
   const resolution = resolutions[inc.id]?.trim()
   if (idx === undefined || idx === '') return alert('请选择处理方案')
   if (!resolution) return alert('请填写处理结论说明')
-  data.resolveIncident(inc.id, auth.currentUser!.name, resolution, OPTIONS[inc.type][idx].effects)
+  data.resolveIncident(inc.id, auth.currentUser!.name, resolution, OPTIONS[inc.type]![idx].effects)
 }
 </script>
 

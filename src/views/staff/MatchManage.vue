@@ -67,6 +67,27 @@
     </div>
 
     <div class="card">
+      <div class="card-title">🧊 冻结组合（{{ frozenMatches.length }} 组待回滚）</div>
+      <template v-if="frozenMatches.length">
+        <div v-for="m in frozenMatches" :key="m.id" class="match-row" style="border-color: var(--rose, #e11d63); background: #fff7fa">
+          <div class="row between wrap">
+            <div style="flex: 1; min-width: 260px">
+              <b>{{ itemName(m.itemAId) }}</b> 🔄 <b>{{ itemName(m.itemBId) }}</b>
+              <div class="tag-list mt8">
+                <span class="tag rose">问题物品：{{ itemName(m.problemItemId ?? '') }}</span>
+                <span class="tag">摊位 {{ m.booth }} · {{ m.entryTime }}</span>
+                <span class="tag" v-if="m.counterpartDecision">对方选择：{{ counterpartLabel(m.counterpartDecision.kind) }}</span>
+                <span class="tag amber" v-else>对方尚未选择</span>
+              </div>
+            </div>
+            <router-link to="/staff/incidents" class="btn sm danger">前往异常处置台回滚</router-link>
+          </div>
+        </div>
+      </template>
+      <EmptyState v-else icon="🧊" text="暂无冻结组合" />
+    </div>
+
+    <div class="card">
       <div class="card-title">🎫 已预约（{{ confirmed.length }} 组）</div>
       <table v-if="confirmed.length" class="table">
         <thead><tr><th>交换组合</th><th>摊位</th><th>入场时段</th><th>状态</th></tr></thead>
@@ -113,20 +134,26 @@ const activeMatches = computed(() =>
 )
 const pendingMatches = activeMatches
 const confirmed = computed(() => data.matches.filter((m) => m.status === 'confirmed'))
+const frozenMatches = computed(() => data.matches.filter((m) => m.status === 'frozen'))
 
 function itemName(id: string) {
   return data.itemById(id)?.name ?? '未知物品'
+}
+function counterpartLabel(kind: string) {
+  return { continue: '继续交换', free_exchange: '改为自由交换', wait: '等待替代物品', cancel: '取消' }[kind] ?? kind
 }
 function matchLabel(s: MatchStatus) {
   return {
     proposed: '待双方确认', accepted_a: '一方已确认', accepted_b: '一方已确认',
     confirmed: '已预约', declined: '已拒绝', cancelled: '已取消', completed: '已完成', failed: '未成交',
+    frozen: '问题冻结',
   }[s]
 }
 function matchTone(s: MatchStatus) {
   return {
     proposed: 'purple', accepted_a: 'indigo', accepted_b: 'indigo',
     confirmed: 'blue', declined: 'red', cancelled: 'gray', completed: 'green', failed: 'red',
+    frozen: 'rose',
   }[s]
 }
 

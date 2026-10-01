@@ -1,0 +1,8 @@
+node_modules
+dist
+smoke-dist
+.git
+.claude
+.codex
+*.log
+.DS_Store

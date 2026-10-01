@@ -15,6 +15,7 @@
           <router-link v-if="item.status === 'approved'" to="/parent/matches" class="btn sm primary">去撮合</router-link>
           <router-link v-if="item.status === 'matched'" to="/parent/matches" class="btn sm primary">确认撮合</router-link>
           <button v-if="item.status === 'reserved'" class="btn sm primary" @click="pass = item">🎫 入场凭证</button>
+          <button v-if="item.status === 'frozen'" class="btn sm danger" @click="$router.push('/parent/incidents')">🧊 物品冻结中，查看处置</button>
           <button v-if="item.status === 'disputed'" class="btn sm danger" @click="$router.push('/parent/incidents')">🛟 查看争议</button>
           <template v-if="item.status === 'no_exchange'">
             <button v-if="item.acceptDonation && !hasDonation(item.id)" class="btn sm success" @click="donate(item)">💚 申请转捐</button>

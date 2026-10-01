@@ -9,10 +9,16 @@
       <div class="card-title">⏳ 待审核（{{ data.pendingItems.length }}）</div>
       <template v-if="data.pendingItems.length">
         <div v-for="item in data.pendingItems" :key="item.id" class="review-row">
+          <div v-if="data.needsEnhancedReview(item)" class="notice warn" style="margin-bottom: 10px">
+            🧾 该家庭此前有物品多次被现场退回，本件须走<b>强化照片复核与缺件说明</b>流程：核对多角度实拍、零件清单与报名描述一致后才可通过；该家庭暂不参与自动撮合。
+          </div>
           <ItemCard :item="item" show-owner>
             <template #actions>
-              <button class="btn sm success" @click="approve(item)">✅ 通过</button>
-              <button class="btn sm danger" @click="openReject(item)">🚫 驳回</button>
+              <button v-if="data.needsEnhancedReview(item)" class="btn sm primary" @click="openEnhanced(item)">🧾 强化复核</button>
+              <template v-else>
+                <button class="btn sm success" @click="approve(item)">✅ 通过</button>
+                <button class="btn sm danger" @click="openReject(item)">🚫 驳回</button>
+              </template>
               <button class="btn sm outline" @click="detail = item">📋 详情</button>
             </template>
           </ItemCard>
@@ -77,12 +83,40 @@
       </div>
     </div>
 
+    <!-- 强化照片复核弹窗 -->
+    <div v-if="enhancing" class="modal-mask" @click.self="enhancing = null">
+      <div class="modal" style="width: 480px">
+        <div class="modal-head">
+          <h3>🧾 强化照片复核「{{ enhancing.name }}」</h3>
+          <button class="modal-close" @click="enhancing = null">✕</button>
+        </div>
+        <div class="notice warn mb12">
+          该家庭此前有物品多次现场退回。请逐项核对：多角度实拍照片、零件/缺件清单、成色与消毒情况，确认与报名描述完全一致。
+        </div>
+        <div class="field">
+          <label class="check-line"><input v-model="enhancedChecks.photos" type="checkbox" /> 多角度实拍照片与实物一致</label>
+          <label class="check-line"><input v-model="enhancedChecks.parts" type="checkbox" /> 已核对零件清单，无缺件（或家长已书面列明缺件）</label>
+          <label class="check-line"><input v-model="enhancedChecks.desc" type="checkbox" /> 成色、品类与报名描述一致</label>
+          <label class="check-line"><input v-model="enhancedChecks.sanitation" type="checkbox" /> 消毒状态可确认</label>
+        </div>
+        <div class="field">
+          <label>复核说明<span class="req">*</span></label>
+          <textarea v-model.trim="enhancedNote" class="textarea" placeholder="记录核对结果与缺件说明……" />
+        </div>
+        <div class="row">
+          <button class="btn success" :disabled="!enhancedAllChecked" @click="confirmEnhanced(true)">✅ 核对无误，通过</button>
+          <button class="btn danger" @click="confirmEnhanced(false)">🚫 材料不足，驳回重报</button>
+          <button class="btn ghost" @click="enhancing = null">取消</button>
+        </div>
+      </div>
+    </div>
+
     <ItemDetailModal :item="detail" @close="detail = null" />
   </AppShell>
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, reactive, ref } from 'vue'
 import AppShell from '../../components/AppShell.vue'
 import PhaseBar from '../../components/PhaseBar.vue'
 import ItemCard from '../../components/ItemCard.vue'
@@ -102,6 +136,13 @@ const detail = ref<Item | null>(null)
 const rejecting = ref<Item | null>(null)
 const rejectReason = ref('')
 const rejectNote = ref('')
+
+const enhancing = ref<Item | null>(null)
+const enhancedNote = ref('')
+const enhancedChecks = reactive({ photos: false, parts: false, desc: false, sanitation: false })
+const enhancedAllChecked = computed(
+  () => enhancedChecks.photos && enhancedChecks.parts && enhancedChecks.desc && enhancedChecks.sanitation,
+)
 
 const reviewed = computed(() =>
   data.items.filter((i) => i.review && i.status !== 'pending'),
@@ -128,6 +169,20 @@ function confirmReject() {
   const reason = rejectNote.value ? `${rejectReason.value}：${rejectNote.value}` : rejectReason.value
   data.reviewItem(rejecting.value.id, 'rejected', auth.currentUser!.name, reason)
   rejecting.value = null
+}
+
+function openEnhanced(item: Item) {
+  enhancing.value = item
+  enhancedNote.value = ''
+  enhancedChecks.photos = enhancedChecks.parts = enhancedChecks.desc = enhancedChecks.sanitation = false
+}
+
+function confirmEnhanced(passed: boolean) {
+  if (!enhancing.value) return
+  if (passed && !enhancedNote.value.trim()) return alert('请填写复核说明与缺件核对结果')
+  if (!passed && !enhancedNote.value.trim()) enhancedNote.value = '请补充零件清单与多角度实拍照片后重新报名'
+  data.enhancedReviewItem(enhancing.value.id, passed, auth.currentUser!.name, enhancedNote.value)
+  enhancing.value = null
 }
 </script>
 

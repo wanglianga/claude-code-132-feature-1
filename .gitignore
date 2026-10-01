@@ -27,10 +27,19 @@ temp/
 *.log
 *.sqlite
 *.db
-*screenshot*
-*screen-capture*
-*recording*
-*trace*
-*debug*
-*temp*
-*tmp*
+
+# 例外：*temp* 规则会误匹配 ItemPhoto.vue（忽略大小写），该组件必须纳入版本库
+!src/components/ItemPhoto.vue
+.local/*.tar
+.local/*.tar.gz
+.local/*.tgz
+.local/*.zip
+.local/*.7z
+*screenshot*.png
+*screenshot*.jpg
+*screenshot*.jpeg
+*screen-capture*.png
+*screen-capture*.jpg
+*recording*.webm
+*recording*.mp4
+*trace*.jsonl

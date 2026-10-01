@@ -68,10 +68,71 @@
             <div v-if="!willPass" class="notice warn mb12">
               当前核验结果不通过，提交后物品将转入异常处理流程
             </div>
-            <button class="btn primary lg block" @click="submitCheckIn">
-              {{ willPass ? '✅ 核验通过，完成核销' : '⚠️ 提交核验（转入异常处理）' }}
-            </button>
+            <div class="row">
+              <button class="btn primary lg" style="flex: 1" @click="submitCheckIn">
+                {{ willPass ? '✅ 核验通过，完成核销' : '⚠️ 提交核验（转入异常处理）' }}
+              </button>
+              <button class="btn danger lg" @click="showProblem = !showProblem">🧊 拍照标记问题并冻结</button>
+            </div>
+
+            <!-- 实物问题冻结面板 -->
+            <div v-if="showProblem" class="freeze-panel mt12">
+              <div class="card-title" style="font-size: 14px">🧊 标记实物问题（物品与关联撮合将被冻结）</div>
+              <div class="field">
+                <label>问题类型<span class="req">*</span></label>
+                <div class="chip-row">
+                  <button
+                    v-for="t in problemTypes"
+                    :key="t"
+                    type="button"
+                    class="chip"
+                    :class="{ on: problem.type === t }"
+                    @click="problem.type = t"
+                  >
+                    {{ PROBLEM_META[t].icon }} {{ PROBLEM_META[t].label }}
+                  </button>
+                </div>
+                <p class="hint">{{ PROBLEM_META[problem.type].hint }}</p>
+              </div>
+              <div class="field">
+                <label>现场拍照存证<span class="req">*</span>（最多 3 张，将附在异常单中供社区复核）</label>
+                <div class="row wrap">
+                  <div v-for="(p, i) in problem.photos" :key="i" style="position: relative">
+                    <ItemPhoto :photo="p" :category="current.category" />
+                    <button
+                      type="button"
+                      class="modal-close"
+                      style="position: absolute; top: -6px; right: -6px; width: 20px; height: 20px; font-size: 10px"
+                      @click="problem.photos.splice(i, 1)"
+                    >✕</button>
+                  </div>
+                  <label v-if="problem.photos.length < 3" class="item-photo" style="cursor: pointer; font-size: 24px; color: var(--ink-3)">
+                    📷
+                    <input type="file" accept="image/*" capture="environment" style="display: none" @change="onProblemPhoto" />
+                  </label>
+                </div>
+                <p class="hint">无相机环境可直接提交，系统将使用占位照片标记「已拍照」</p>
+              </div>
+              <div v-if="problem.type === 'missing_parts'" class="field">
+                <label>缺件说明<span class="req">*</span></label>
+                <textarea v-model.trim="problem.missingParts" class="textarea" placeholder="列明缺少的关键零件，如：遥控器 1 个、直轨 2 节……" />
+              </div>
+              <div class="field">
+                <label>情况说明</label>
+                <textarea v-model.trim="problem.note" class="textarea" placeholder="描述实物与报名照片/描述的差异、消毒核查情况……" />
+              </div>
+              <div class="notice error mb12">
+                冻结后该物品不能再被核销或撮合，原撮合对象的取物凭证同步失效；由社区现场复核后组织回滚处置。
+              </div>
+              <div class="row">
+                <button class="btn danger lg" style="flex: 1" @click="submitProblem">🧊 确认冻结并生成异常单</button>
+                <button class="btn ghost lg" @click="showProblem = false">返回</button>
+              </div>
+            </div>
           </template>
+          <div v-else-if="current.status === 'frozen'" class="notice error mt12">
+            🧊 该物品已因实物问题冻结，等待社区现场复核与回滚处置，不能重复核销
+          </div>
           <div v-else-if="current.checkIn" class="notice info mt12">
             该物品已于 {{ fmtTime(current.checkIn.at) }} 由 {{ current.checkIn.by }} 核销（{{ current.checkIn.passed ? '通过' : '存疑' }}）
           </div>
@@ -163,9 +224,9 @@ import StatusBadge from '../../components/StatusBadge.vue'
 import EmptyState from '../../components/EmptyState.vue'
 import { useAuthStore } from '../../stores/auth'
 import { useDataStore } from '../../stores/data'
-import { CONDITION_META, INCIDENT_META, STATUS_META } from '../../meta'
+import { CONDITION_META, INCIDENT_META, PROBLEM_META, STATUS_META } from '../../meta'
 import { fmtTime } from '../../utils'
-import type { IncidentType, Item } from '../../types'
+import type { IncidentType, Item, ProblemType } from '../../types'
 
 const auth = useAuthStore()
 const data = useDataStore()
@@ -180,6 +241,62 @@ const form = reactive({
   disinfected: true,
   note: '',
 })
+
+const showProblem = ref(false)
+const problemTypes: ProblemType[] = ['missing_parts', 'photo_differs', 'sanitation']
+const problem = reactive({
+  type: 'missing_parts' as ProblemType,
+  photos: [] as string[],
+  missingParts: '',
+  note: '',
+})
+
+function resetProblem() {
+  problem.type = 'missing_parts'
+  problem.photos = []
+  problem.missingParts = ''
+  problem.note = ''
+  showProblem.value = false
+}
+
+function onProblemPhoto(e: Event) {
+  const file = (e.target as HTMLInputElement).files?.[0]
+  if (!file) return
+  const reader = new FileReader()
+  reader.onload = () => {
+    const img = new Image()
+    img.onload = () => {
+      const canvas = document.createElement('canvas')
+      const scale = Math.min(1, 480 / Math.max(img.width, img.height))
+      canvas.width = img.width * scale
+      canvas.height = img.height * scale
+      canvas.getContext('2d')!.drawImage(img, 0, 0, canvas.width, canvas.height)
+      problem.photos.push(canvas.toDataURL('image/jpeg', 0.75))
+    }
+    img.src = String(reader.result)
+  }
+  reader.readAsDataURL(file)
+  ;(e.target as HTMLInputElement).value = ''
+}
+
+function submitProblem() {
+  if (!current.value) return
+  if (problem.type === 'missing_parts' && !problem.missingParts.trim()) {
+    return alert('请填写缺件说明，列明缺少的关键零件')
+  }
+  if (!problem.note.trim()) {
+    return alert('请填写现场情况说明')
+  }
+  data.flagItemProblem(
+    current.value.id,
+    { type: problem.type, photos: [...problem.photos], missingParts: problem.missingParts, note: problem.note },
+    auth.currentUser!.name,
+  )
+  code.value = ''
+  current.value = null
+  resetProblem()
+  alert('已拍照标记并冻结物品及关联撮合，异常单已提交社区处置')
+}
 
 const owner = computed(() => (current.value ? data.userById(current.value.parentId) : null))
 const canCheckIn = computed(
@@ -218,6 +335,7 @@ function lookup() {
   form.damage = 'none'
   form.disinfected = item.disinfected
   form.note = ''
+  resetProblem()
 }
 
 function fillCode(c: string) {
@@ -286,4 +404,10 @@ function report() {
   border-bottom: 1px solid #f5eee6;
 }
 .queue-row:last-child { border-bottom: none; }
+.freeze-panel {
+  border: 1px solid var(--rose, #e11d63);
+  border-radius: 12px;
+  padding: 14px;
+  background: #fff7fa;
+}
 </style>

@@ -1,0 +1,8 @@
+services:
+  web:
+    build: .
+    image: swap-meet:latest
+    container_name: swap-meet
+    ports:
+      - "8080:80"
+    restart: unless-stopped

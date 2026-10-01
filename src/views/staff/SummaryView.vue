@@ -17,13 +17,37 @@
         <div class="card-title">📦 物品去向分布</div>
         <div class="bar-row"><span class="bar-label">交换成功</span><div class="bar-track"><div class="bar-fill green" :style="{ width: pct(summary.exchangedCount) }" /></div><span class="bar-num">{{ summary.exchangedCount }} 件</span></div>
         <div class="bar-row"><span class="bar-label">公益转捐</span><div class="bar-track"><div class="bar-fill" style="background: var(--pink)" :style="{ width: pct(summary.donated.length) }" /></div><span class="bar-num">{{ summary.donated.length }} 件</span></div>
+        <div class="bar-row"><span class="bar-label">实物问题冻结</span><div class="bar-track"><div class="bar-fill" style="background: var(--rose, #e11d63)" :style="{ width: pct(summary.frozen.length) }" /></div><span class="bar-num">{{ summary.frozen.length }} 件</span></div>
         <div class="bar-row"><span class="bar-label">无人交换</span><div class="bar-track"><div class="bar-fill" style="background: var(--orange)" :style="{ width: pct(summary.noExchange.length) }" /></div><span class="bar-num">{{ summary.noExchange.length }} 件</span></div>
         <div class="bar-row"><span class="bar-label">家长带回</span><div class="bar-track"><div class="bar-fill" style="background: var(--gray)" :style="{ width: pct(summary.takenBack.length) }" /></div><span class="bar-num">{{ summary.takenBack.length }} 件</span></div>
         <div class="bar-row"><span class="bar-label">未到场</span><div class="bar-track"><div class="bar-fill red" :style="{ width: pct(summary.noShow.length) }" /></div><span class="bar-num">{{ summary.noShow.length }} 件</span></div>
+        <div class="notice info mt12">现场因实物问题复核退回共 <b>{{ summary.problemReturns }}</b> 次；强化复核期家庭 <b>{{ summary.restrictedParents.length }}</b> 个（暂停自动撮合，须强化照片复核）。</div>
       </div>
 
       <div class="card">
-        <div class="card-title">📊 下一场品类缺口分析</div>
+        <div class="card-title">🧾 强化复核家庭（自动撮合限制名单）</div>
+        <template v-if="summary.restrictedParents.length">
+          <table class="table">
+            <thead><tr><th>家庭</th><th>孩子</th><th>累计退回</th><th>摊位优先级补偿</th><th>操作</th></tr></thead>
+            <tbody>
+              <tr v-for="u in summary.restrictedParents" :key="u.id">
+                <td>{{ u.name }} {{ u.phone }}</td>
+                <td>{{ u.childName }} {{ u.childAge }} 岁</td>
+                <td><span class="badge rose">{{ data.rejectionCount(u.id) }} 次</span></td>
+                <td><span class="badge indigo">+{{ u.boothPriority ?? 0 }}</span></td>
+                <td><button class="btn sm outline" @click="restore(u.id)">恢复自动撮合资格</button></td>
+              </tr>
+            </tbody>
+          </table>
+          <p class="small muted mt8">累计 ≥2 次现场复核不通过即自动暂停；连续无问题后可由社区手动恢复。</p>
+        </template>
+        <EmptyState v-else icon="✅" text="暂无被限制自动撮合资格的家庭" />
+      </div>
+    </div>
+
+    <div class="card mt16">
+      <div class="card-title">📊 下一场品类缺口分析</div>
+      <div class="grid cols-2">
         <div v-for="g in summary.gap" :key="g.category" class="bar-row">
           <span class="bar-label">{{ g.icon }} {{ g.label }}</span>
           <div class="bar-track">
@@ -31,11 +55,11 @@
           </div>
           <span class="bar-num">需 {{ g.demand }} / 供 {{ g.supply }}</span>
         </div>
-        <div v-if="gapAdvice.length" class="notice warn mt12">
-          💡 建议下一场重点招募：<b>{{ gapAdvice.join('、') }}</b>（需求大于供给）
-        </div>
-        <div v-else class="notice success mt12">✅ 各品类供需基本平衡</div>
       </div>
+      <div v-if="gapAdvice.length" class="notice warn mt12">
+        💡 建议下一场重点招募：<b>{{ gapAdvice.join('、') }}</b>（需求大于供给）
+      </div>
+      <div v-else class="notice success mt12">✅ 各品类供需基本平衡</div>
     </div>
 
     <div class="grid cols-2 mt16">
@@ -97,9 +121,11 @@ import { computed } from 'vue'
 import AppShell from '../../components/AppShell.vue'
 import PhaseBar from '../../components/PhaseBar.vue'
 import EmptyState from '../../components/EmptyState.vue'
+import { useAuthStore } from '../../stores/auth'
 import { useDataStore } from '../../stores/data'
 import { INCIDENT_META } from '../../meta'
 
+const auth = useAuthStore()
 const data = useDataStore()
 const summary = computed(() => data.summary)
 
@@ -111,6 +137,12 @@ function pct(n: number, base?: number) {
 }
 
 const gapAdvice = computed(() => summary.value.gap.filter((g) => g.gap > 0).map((g) => g.label))
+
+function restore(parentId: string) {
+  if (confirm('确认恢复该家庭的自动撮合资格？其后续报名将重新进入自动撮合池。')) {
+    data.restoreAutoMatchEligibility(parentId, auth.currentUser!.name)
+  }
+}
 
 const donationRows = computed(() => {
   const rows: { org: string; items: typeof summary.value.donated }[] = []

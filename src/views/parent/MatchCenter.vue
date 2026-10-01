@@ -68,6 +68,21 @@
       </template>
       <EmptyState v-else icon="🎫" text="暂无已预约的交换" />
     </div>
+
+    <!-- 冻结中的交换 -->
+    <div v-if="frozenMatches.length" class="card" style="border-color: var(--rose, #e11d63)">
+      <div class="card-title">🧊 冻结中的交换（{{ frozenMatches.length }}）</div>
+      <div v-for="m in frozenMatches" :key="m.id" class="match-row" style="background: #fff7fa">
+        <MatchPair :match="m" />
+        <div class="notice error mt8">
+          对方物品被现场标记实物问题，撮合与取物凭证已冻结。请前往「争议协调」页查看问题照片/缺件说明并选择处置方式
+          （继续交换 / 改为自由交换 / 等待替代物品 / 取消），最终由社区依据现场复核执行。
+        </div>
+        <div class="row" style="justify-content: flex-end">
+          <router-link to="/parent/incidents" class="btn sm danger">前往争议协调</router-link>
+        </div>
+      </div>
+    </div>
   </AppShell>
 </template>
 
@@ -100,6 +115,7 @@ const pendingMatches = computed(() =>
   myMatches.value.filter((m) => ['proposed', 'accepted_a', 'accepted_b'].includes(m.status)),
 )
 const confirmedMatches = computed(() => myMatches.value.filter((m) => m.status === 'confirmed'))
+const frozenMatches = computed(() => myMatches.value.filter((m) => m.status === 'frozen'))
 
 function ownerOf(item: Item) {
   return data.userById(item.parentId)

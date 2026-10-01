@@ -51,6 +51,28 @@
         <p class="small muted">核销人 {{ item.checkIn.by }} · {{ fmtTime(item.checkIn.at) }}</p>
       </template>
 
+      <template v-if="item.problems && item.problems.length">
+        <div class="divider" />
+        <div class="card-title">现场实物问题记录</div>
+        <div v-for="(p, i) in item.problems" :key="i" class="problem-block">
+          <div class="tag-list">
+            <span class="badge rose">{{ PROBLEM_META[p.type].icon }} {{ PROBLEM_META[p.type].label }}</span>
+            <span class="tag">{{ p.by }} · {{ fmtTime(p.at) }}</span>
+            <span v-if="p.staffVerdict" class="badge" :class="p.staffVerdict.passed ? 'green' : 'red'">
+              社区复核{{ p.staffVerdict.passed ? '通过' : '不通过' }}
+            </span>
+          </div>
+          <div class="row wrap mt8">
+            <ItemPhoto v-for="(ph, j) in p.photos" :key="j" :photo="ph" :category="item.category" />
+          </div>
+          <p v-if="p.missingParts" class="small mt8"><b>缺件说明：</b>{{ p.missingParts }}</p>
+          <p v-if="p.note" class="small muted">{{ p.note }}</p>
+          <p v-if="p.staffVerdict" class="small mt8">
+            <b>现场复核：</b>{{ p.staffVerdict.note ?? '已对照原始描述完成复核' }}（{{ p.staffVerdict.by }}）
+          </p>
+        </div>
+      </template>
+
       <div class="divider" />
       <div class="card-title">流转记录</div>
       <ItemTimeline :history="item.history" />
@@ -61,7 +83,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { Item } from '../types'
-import { CATEGORY_META, CONDITION_META } from '../meta'
+import { CATEGORY_META, CONDITION_META, PROBLEM_META } from '../meta'
 import { fmtAge, fmtTime, fmtValue } from '../utils'
 import { useDataStore } from '../stores/data'
 import ItemPhoto from './ItemPhoto.vue'
@@ -83,3 +105,13 @@ const damageText = computed(() => {
   return d === 'none' ? '✅ 无破损' : d === 'minor' ? '⚠️ 轻微破损' : '❌ 严重破损'
 })
 </script>
+
+<style scoped>
+.problem-block {
+  background: #fff7fa;
+  border: 1px solid #fbd9e6;
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+}
+</style>

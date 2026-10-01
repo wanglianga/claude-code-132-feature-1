@@ -1,4 +1,4 @@
-import type { Category, Condition, EventPhase, IncidentType, ItemStatus, Role } from './types'
+import type { Category, Condition, CounterpartChoiceKind, EventPhase, IncidentType, ItemStatus, ProblemType, Role } from './types'
 
 export const CATEGORY_META: Record<Category, { label: string; icon: string; allowed: boolean }> = {
   toy: { label: '玩具', icon: '🧸', allowed: true },
@@ -24,6 +24,7 @@ export const STATUS_META: Record<ItemStatus, { label: string; tone: string }> = 
   free_zone: { label: '自由交换区', tone: 'slate' },
   arrived: { label: '已到场', tone: 'cyan' },
   verified: { label: '核销通过', tone: 'teal' },
+  frozen: { label: '问题冻结', tone: 'rose' },
   exchanged: { label: '交换成功', tone: 'green' },
   no_exchange: { label: '无人交换', tone: 'orange' },
   donated: { label: '已转捐', tone: 'pink' },
@@ -52,6 +53,23 @@ export const INCIDENT_META: Record<IncidentType, { label: string; icon: string }
   child_regret: { label: '孩子现场反悔', icon: '😢' },
   value_dispute: { label: '双方价值争议', icon: '⚖️' },
   charity_capacity: { label: '公益接收能力不足', icon: '📦' },
+  item_problem: { label: '实物不符冻结', icon: '🧊' },
+  mediation: { label: '转人工调解', icon: '🧑‍⚖️' },
+}
+
+/** 志愿者现场可标记的三类实物问题 */
+export const PROBLEM_META: Record<ProblemType, { label: string; icon: string; hint: string }> = {
+  missing_parts: { label: '缺少关键零件', icon: '🧩', hint: '如遥控器、配件、套装组件缺失，需在缺件说明中列明' },
+  photo_differs: { label: '与报名照片差异较大', icon: '📷', hint: '实物成色、款式、颜色等与报名照片明显不一致' },
+  sanitation: { label: '消毒状态无法确认', icon: '🧴', hint: '家长申报已消毒但现场无法确认，或物品明显未清洁' },
+}
+
+/** 原撮合对象在对方物品冻结后的四个选择 */
+export const CHOICE_META: Record<CounterpartChoiceKind, { label: string; icon: string; desc: string }> = {
+  continue: { label: '继续交换', icon: '✅', desc: '知晓问题并愿意按现状继续交换，需社区现场复核确认' },
+  free_exchange: { label: '改为自由交换', icon: '🎪', desc: '解除本组合，物品转入自由交换区另寻交换对象' },
+  wait: { label: '等待替代物品', icon: '⏳', desc: '保留预约时段与摊位，由社区协调替代物品后再交换' },
+  cancel: { label: '取消', icon: '✖️', desc: '取消本次交换；已到场可保留时段改约，未到场则释放时段' },
 }
 
 export const PHASE_META: Record<EventPhase, { label: string; desc: string }> = {

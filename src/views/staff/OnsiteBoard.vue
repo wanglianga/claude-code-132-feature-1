@@ -9,7 +9,28 @@
       <div class="card stat-card"><div class="num">{{ data.reservedItems.length }}</div><div class="lbl">待到场（已预约）</div></div>
       <div class="card stat-card"><div class="num">{{ data.arrivedItems.length }}</div><div class="lbl">已到场 / 核销</div></div>
       <div class="card stat-card"><div class="num" style="color: var(--green)">{{ exchangedCount }}</div><div class="lbl">交换成功</div></div>
-      <div class="card stat-card"><div class="num" style="color: var(--red)">{{ data.summary.noShow.length }}</div><div class="lbl">未到场</div></div>
+      <div class="card stat-card">
+        <div class="num" style="color: var(--red)">{{ data.frozenItems.length + data.summary.noShow.length }}</div>
+        <div class="lbl">冻结 {{ data.frozenItems.length }} · 未到场 {{ data.summary.noShow.length }}</div>
+      </div>
+    </div>
+
+    <div v-if="frozenMatches.length" class="card mt16" style="border-color: #f2c6c6">
+      <div class="card-title">🧊 冻结 / 回滚中的组合（{{ frozenMatches.length }}）</div>
+      <table class="table">
+        <thead><tr><th>摊位</th><th>物品 A</th><th>物品 B</th><th>问题</th><th>对方选择</th><th>状态</th></tr></thead>
+        <tbody>
+          <tr v-for="m in frozenMatches" :key="m.id">
+            <td>{{ m.booth ? `摊位 ${m.booth}（复核保留中）` : '已释放' }}</td>
+            <td>{{ itemName(m.itemAId) }}</td>
+            <td>{{ itemName(m.itemBId) }}</td>
+            <td class="small" style="color: var(--red)">{{ problemText(m) }}</td>
+            <td>{{ m.rollout ? ROLLOUT_META[m.rollout.choice].label : '待对方选择' }}</td>
+            <td><span class="badge" :class="m.status === 'frozen' ? 'red' : 'amber'">{{ m.status === 'frozen' ? '已冻结' : '等待替代' }}</span></td>
+          </tr>
+        </tbody>
+      </table>
+      <p class="small muted mt8">请到「异常处置」完成现场复核；复核放行且对方选择继续交换后，组合才恢复可成交。</p>
     </div>
 
     <div class="card mt16">
@@ -30,9 +51,12 @@
             <td>
               <button
                 class="btn sm success"
-                :disabled="!bothVerified(m)"
+                :disabled="!data.canConfirmExchange(m)"
                 @click="complete(m.id)"
               >✅ 确认交换完成</button>
+              <div v-if="bothVerified(m) && !data.canConfirmExchange(m)" class="small" style="color: var(--red)">
+                存在未解决争议/调解，办结后方可成交
+              </div>
             </td>
           </tr>
         </tbody>
@@ -54,7 +78,7 @@
         </select>
         <button class="btn primary" :disabled="!freeA || !freeB" @click="registerFree">登记自由交换</button>
       </div>
-      <p class="small muted mt8">自由交换区 / 已到场的物品，双方家长现场确认后即可登记成交</p>
+      <p class="small muted mt8">自由交换区 / 已到场 / 等待替代物品的物品，双方家长现场确认后即可登记成交</p>
     </div>
 
     <div class="card">
@@ -84,16 +108,18 @@ import StatusBadge from '../../components/StatusBadge.vue'
 import EmptyState from '../../components/EmptyState.vue'
 import { useAuthStore } from '../../stores/auth'
 import { useDataStore } from '../../stores/data'
+import { PROBLEM_FLAG_META, ROLLOUT_META } from '../../meta'
 import type { ItemStatus, Match } from '../../types'
 
 const auth = useAuthStore()
 const data = useDataStore()
 
 const confirmedMatches = computed(() => data.matches.filter((m) => m.status === 'confirmed'))
+const frozenMatches = computed(() => data.matches.filter((m) => m.status === 'frozen' || m.status === 'waiting_replace'))
 const exchangedCount = computed(() => data.items.filter((i) => i.status === 'exchanged').length)
 
 const freeCandidates = computed(() =>
-  data.items.filter((i) => ['free_zone', 'arrived', 'verified', 'no_exchange'].includes(i.status)),
+  data.items.filter((i) => ['free_zone', 'arrived', 'verified', 'no_exchange', 'waiting_replace'].includes(i.status)),
 )
 const freeA = ref('')
 const freeB = ref('')
@@ -101,6 +127,12 @@ const freeCandidatesB = computed(() => freeCandidates.value.filter((x) => x.id !
 
 function itemName(id: string) {
   return data.itemById(id)?.name ?? '未知'
+}
+function problemText(m: Match) {
+  const p = data.itemById(m.frozenItemId ?? '')
+  if (!p) return '—'
+  const flags = (p.freezeFlags ?? []).map((f) => PROBLEM_FLAG_META[f].label).join('、')
+  return `${p.name}：${flags || '实物不符'}`
 }
 function itemStatus(id: string): ItemStatus {
   return data.itemById(id)?.status ?? 'pending'

@@ -70,6 +70,35 @@
     </div>
 
     <div class="card mt16">
+      <div class="card-title">🧊 现场实物不符与撮合回滚（{{ data.summary.onsiteRejected.length }} 件曾被退回 · {{ data.summary.frozen.length }} 件冻结中）</div>
+      <table v-if="[...data.summary.onsiteRejected, ...data.summary.frozen].length" class="table">
+        <thead><tr><th>物品</th><th>家长</th><th>问题</th><th>缺件说明</th><th>退回次数</th><th>当前状态</th></tr></thead>
+        <tbody>
+          <tr v-for="item in onsiteRows" :key="item.id">
+            <td>{{ item.name }}（{{ item.code }}）</td>
+            <td>{{ data.userById(item.parentId)?.name }}</td>
+            <td class="small">
+              <span v-for="f in item.freezeFlags ?? item.checkIn?.flags ?? []" :key="f" class="badge red" style="margin-right: 4px">
+                {{ PROBLEM_FLAG_META[f].label }}
+              </span>
+              <span v-if="!(item.freezeFlags ?? item.checkIn?.flags)?.length">—</span>
+            </td>
+            <td class="small muted">{{ item.checkIn?.missingPartsNote ?? '—' }}</td>
+            <td>{{ item.rejectCount ?? 0 }}</td>
+            <td><StatusBadge :status="item.status" /></td>
+          </tr>
+        </tbody>
+      </table>
+      <EmptyState v-else icon="🧊" text="本场无现场实物不符记录" />
+      <div v-if="data.summary.blockedFamilies.length" class="notice warn mt12">
+        ⚠️ <b>自动撮合资格暂停家庭</b>：
+        <span v-for="(u, i) in data.summary.blockedFamilies" :key="u.id">
+          {{ u.name }}<span class="small muted">（{{ u.autoMatchBlockReason }}）</span>{{ i < data.summary.blockedFamilies.length - 1 ? '；' : '' }}
+        </span>
+      </div>
+    </div>
+
+    <div class="card mt16">
       <div class="card-title">⚖️ 争议与异常处理（{{ data.incidents.length }} 起）</div>
       <table v-if="data.incidents.length" class="table">
         <thead><tr><th>事件</th><th>类型</th><th>关联物品</th><th>状态</th><th>处理结论</th></tr></thead>
@@ -97,11 +126,19 @@ import { computed } from 'vue'
 import AppShell from '../../components/AppShell.vue'
 import PhaseBar from '../../components/PhaseBar.vue'
 import EmptyState from '../../components/EmptyState.vue'
+import StatusBadge from '../../components/StatusBadge.vue'
 import { useDataStore } from '../../stores/data'
-import { INCIDENT_META } from '../../meta'
+import { INCIDENT_META, PROBLEM_FLAG_META } from '../../meta'
 
 const data = useDataStore()
 const summary = computed(() => data.summary)
+
+/** 曾被现场退回或当前冻结的物品（去重） */
+const onsiteRows = computed(() => {
+  const map = new Map(summary.value.onsiteRejected.map((i) => [i.id, i]))
+  for (const i of summary.value.frozen) map.set(i.id, i)
+  return [...map.values()]
+})
 
 const maxDemand = computed(() => Math.max(1, ...summary.value.gap.map((g) => g.demand)))
 

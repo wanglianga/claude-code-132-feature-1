@@ -153,6 +153,7 @@ import ItemPhoto from '../../components/ItemPhoto.vue'
 import { useAuthStore } from '../../stores/auth'
 import { useDataStore } from '../../stores/data'
 import { AGE_RANGES, ALLOWED_CATEGORIES, CATEGORY_META, CONDITION_META, VALUE_RANGES } from '../../meta'
+import { fileToDataUrl } from '../../utils'
 import type { Category, Condition } from '../../types'
 
 const auth = useAuthStore()
@@ -195,20 +196,7 @@ function toggleSlot(s: string) {
 function onPhoto(e: Event) {
   const file = (e.target as HTMLInputElement).files?.[0]
   if (!file) return
-  const reader = new FileReader()
-  reader.onload = () => {
-    const img = new Image()
-    img.onload = () => {
-      const canvas = document.createElement('canvas')
-      const scale = Math.min(1, 480 / Math.max(img.width, img.height))
-      canvas.width = img.width * scale
-      canvas.height = img.height * scale
-      canvas.getContext('2d')!.drawImage(img, 0, 0, canvas.width, canvas.height)
-      form.photos.push(canvas.toDataURL('image/jpeg', 0.75))
-    }
-    img.src = String(reader.result)
-  }
-  reader.readAsDataURL(file)
+  fileToDataUrl(file).then((url) => form.photos.push(url))
   ;(e.target as HTMLInputElement).value = ''
 }
 

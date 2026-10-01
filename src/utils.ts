@@ -7,6 +7,28 @@ export function uid(prefix: string): string {
   return `${prefix}_${Date.now().toString(36)}_${seq}_${Math.floor(Math.random() * 1e4).toString(36)}`
 }
 
+/** 读取图片文件并压缩为 dataURL（报名照片与现场问题照片共用） */
+export function fileToDataUrl(file: File, maxSize = 480): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onerror = () => reject(new Error('文件读取失败'))
+    reader.onload = () => {
+      const img = new Image()
+      img.onerror = () => reject(new Error('图片解析失败'))
+      img.onload = () => {
+        const canvas = document.createElement('canvas')
+        const scale = Math.min(1, maxSize / Math.max(img.width, img.height))
+        canvas.width = Math.round(img.width * scale)
+        canvas.height = Math.round(img.height * scale)
+        canvas.getContext('2d')!.drawImage(img, 0, 0, canvas.width, canvas.height)
+        resolve(canvas.toDataURL('image/jpeg', 0.75))
+      }
+      img.src = String(reader.result)
+    }
+    reader.readAsDataURL(file)
+  })
+}
+
 export function fmtTime(ts: number): string {
   const d = new Date(ts)
   const p = (n: number) => String(n).padStart(2, '0')

@@ -1,4 +1,4 @@
-import type { Category, Condition, EventPhase, IncidentType, ItemStatus, Role } from './types'
+import type { Category, Condition, EventPhase, IncidentType, ItemStatus, ProblemFlag, Role, RolloutChoice } from './types'
 
 export const CATEGORY_META: Record<Category, { label: string; icon: string; allowed: boolean }> = {
   toy: { label: '玩具', icon: '🧸', allowed: true },
@@ -30,6 +30,8 @@ export const STATUS_META: Record<ItemStatus, { label: string; tone: string }> = 
   taken_back: { label: '已带回', tone: 'gray' },
   no_show: { label: '未到场', tone: 'red' },
   disputed: { label: '争议处理中', tone: 'rose' },
+  frozen: { label: '问题冻结', tone: 'red' },
+  waiting_replace: { label: '等待替代物品', tone: 'amber' },
 }
 
 export const CONDITION_META: Record<Condition, string> = {
@@ -49,9 +51,40 @@ export const ROLE_META: Record<Role, { label: string; icon: string }> = {
 export const INCIDENT_META: Record<IncidentType, { label: string; icon: string }> = {
   no_show: { label: '家长临时缺席', icon: '🚫' },
   photo_mismatch: { label: '物品与照片不符', icon: '📷' },
+  item_discrepancy: { label: '现场实物不符', icon: '🧊' },
   child_regret: { label: '孩子现场反悔', icon: '😢' },
   value_dispute: { label: '双方价值争议', icon: '⚖️' },
   charity_capacity: { label: '公益接收能力不足', icon: '📦' },
+  mediation: { label: '人工调解', icon: '🤝' },
+}
+
+export const PROBLEM_FLAG_META: Record<ProblemFlag, { label: string; icon: string }> = {
+  missing_parts: { label: '缺少关键零件', icon: '🧩' },
+  photo_mismatch: { label: '与报名照片差异较大', icon: '📷' },
+  disinfection_unconfirmed: { label: '消毒状态无法确认', icon: '🧴' },
+}
+
+export const ROLLOUT_META: Record<RolloutChoice, { label: string; icon: string; desc: string }> = {
+  continue: {
+    label: '继续交换',
+    icon: '✅',
+    desc: '由社区现场复核，比对原始描述无误后放行，原摊位与入场时段保留，双方核销后完成交换',
+  },
+  free_exchange: {
+    label: '改为自由交换',
+    icon: '🎪',
+    desc: '释放原摊位与时段，两件物品进入自由交换区现场另寻交换；不影响您的到场登记',
+  },
+  wait_replace: {
+    label: '等待替代物品',
+    icon: '⏳',
+    desc: '暂存物品并保留入场登记，社区协调同类替代物品，原摊位释放给其他组合',
+  },
+  cancel: {
+    label: '取消',
+    icon: '🚫',
+    desc: '退出本次交换：已到场则摊位时段释放、物品可带回或转捐候选；未到场则释放预约',
+  },
 }
 
 export const PHASE_META: Record<EventPhase, { label: string; desc: string }> = {

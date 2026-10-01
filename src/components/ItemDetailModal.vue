@@ -46,9 +46,17 @@
           <span class="tag">{{ damageText }}</span>
           <span class="tag">{{ item.checkIn.disinfectedConfirmed ? '✅ 已确认消毒' : '❌ 未确认消毒' }}</span>
           <span class="tag">{{ item.checkIn.passed ? '核验通过' : '核验存疑' }}</span>
+          <span v-for="f in item.checkIn.flags ?? []" :key="f" class="badge red">{{ PROBLEM_FLAG_META[f].icon }} {{ PROBLEM_FLAG_META[f].label }}</span>
         </div>
+        <p v-if="item.checkIn.missingPartsNote" class="small mt8" style="color: var(--red)">缺件说明：{{ item.checkIn.missingPartsNote }}</p>
         <p v-if="item.checkIn.note" class="small muted mt8">备注：{{ item.checkIn.note }}</p>
         <p class="small muted">核销人 {{ item.checkIn.by }} · {{ fmtTime(item.checkIn.at) }}</p>
+        <div v-if="(item.issuePhotos ?? item.checkIn.issuePhotos)?.length" class="row wrap mt12">
+          <ItemPhoto v-for="(p, i) in (item.issuePhotos ?? item.checkIn.issuePhotos)" :key="i" :photo="p" :category="item.category" />
+        </div>
+        <div v-if="item.rejectCount" class="notice warn mt8">
+          该物品累计现场退回 {{ item.rejectCount }} 次<span v-if="item.intensiveReview">，需强化照片复核与缺件说明</span>
+        </div>
       </template>
 
       <div class="divider" />
@@ -61,7 +69,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { Item } from '../types'
-import { CATEGORY_META, CONDITION_META } from '../meta'
+import { CATEGORY_META, CONDITION_META, PROBLEM_FLAG_META } from '../meta'
 import { fmtAge, fmtTime, fmtValue } from '../utils'
 import { useDataStore } from '../stores/data'
 import ItemPhoto from './ItemPhoto.vue'

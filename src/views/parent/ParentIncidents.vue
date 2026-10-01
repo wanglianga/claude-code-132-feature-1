@@ -17,7 +17,17 @@
           关联物品：{{ itemOf(inc)?.name }}（{{ itemOf(inc)?.code }}） · 上报人 {{ inc.createdBy }} · {{ fmtTime(inc.createdAt) }}
         </p>
 
+        <div v-if="inc.flags?.length" class="tag-list mt8">
+          <span v-for="f in inc.flags" :key="f" class="badge red">{{ PROBLEM_FLAG_META[f].icon }} {{ PROBLEM_FLAG_META[f].label }}</span>
+        </div>
+
         <div class="divider" />
+        <div v-if="(inc.issuePhotos ?? itemOf(inc)?.issuePhotos)?.length" class="row wrap mb12">
+          <ItemPhoto v-for="(p, i) in (inc.issuePhotos ?? itemOf(inc)?.issuePhotos)" :key="i" :photo="p" :category="itemOf(inc)!.category" />
+        </div>
+        <div v-if="itemOf(inc)?.checkIn?.missingPartsNote" class="notice warn mb12">
+          缺件说明：{{ itemOf(inc)?.checkIn?.missingPartsNote }}
+        </div>
         <div class="log-list">
           <div v-for="(log, i) in inc.logs" :key="i" class="log-row">
             <span class="badge" :class="roleTone(log.role)">{{ ROLE_META[log.role].label }}</span>
@@ -52,9 +62,10 @@
 import { computed, reactive } from 'vue'
 import AppShell from '../../components/AppShell.vue'
 import EmptyState from '../../components/EmptyState.vue'
+import ItemPhoto from '../../components/ItemPhoto.vue'
 import { useAuthStore } from '../../stores/auth'
 import { useDataStore } from '../../stores/data'
-import { INCIDENT_META, ROLE_META } from '../../meta'
+import { INCIDENT_META, PROBLEM_FLAG_META, ROLE_META } from '../../meta'
 import { fmtTime } from '../../utils'
 import type { Incident, Role } from '../../types'
 
@@ -63,7 +74,19 @@ const data = useDataStore()
 const myId = auth.currentUser!.id
 
 const myIncidents = computed(() =>
-  data.incidents.filter((i) => data.itemById(i.itemId)?.parentId === myId),
+  data.incidents.filter((i) => {
+    if (data.itemById(i.itemId)?.parentId === myId) return true
+    // 对方物品出问题、但组合涉及自己时，也展示给本人（只读沟通）
+    if (i.matchId) {
+      const m = data.matchById(i.matchId)
+      if (m) {
+        const a = data.itemById(m.itemAId)
+        const b = data.itemById(m.itemBId)
+        return a?.parentId === myId || b?.parentId === myId
+      }
+    }
+    return false
+  }),
 )
 
 const drafts = reactive<Record<string, string>>({})

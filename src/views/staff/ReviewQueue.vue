@@ -9,6 +9,9 @@
       <div class="card-title">⏳ 待审核（{{ data.pendingItems.length }}）</div>
       <template v-if="data.pendingItems.length">
         <div v-for="item in data.pendingItems" :key="item.id" class="review-row">
+          <div v-if="item.intensiveReview" class="notice warn" style="margin-bottom: 8px">
+            📸 <b>强化照片复核</b>：该家庭有多次现场退回记录，请重点核对多角度照片与缺件/配件清单，必要时要求家长补充缺件说明后再放行。
+          </div>
           <ItemCard :item="item" show-owner>
             <template #actions>
               <button class="btn sm success" @click="approve(item)">✅ 通过</button>

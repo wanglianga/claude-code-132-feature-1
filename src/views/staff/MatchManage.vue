@@ -28,13 +28,17 @@
       <div class="row between wrap">
         <div class="card-title" style="margin: 0">🧩 撮合操作</div>
         <div class="row">
-          <button class="btn primary" :disabled="!data.approvedPool.length" @click="runMatch">
+          <button class="btn primary" :disabled="!eligiblePool.length" @click="runMatch">
             ⚡ 一键智能撮合
           </button>
           <button class="btn outline" :disabled="!data.approvedPool.length" @click="toFreeZone">
             📥 未匹配物品转入自由交换区
           </button>
         </div>
+      </div>
+      <div v-if="blockedFamilies.length" class="notice warn mt12">
+        ⚠️ 以下家庭因多次现场退回处于强化复核期，物品不参与一键智能撮合：
+        <span v-for="(u, i) in blockedFamilies" :key="u.id" class="tag">{{ u.name }}（{{ u.autoMatchBlockReason }}）</span>
       </div>
       <div v-if="matchMsg" class="notice success mt12">{{ matchMsg }}</div>
       <div class="bar-row mt12">
@@ -44,7 +48,28 @@
         </div>
         <span class="bar-num">{{ data.boothUsed }}/{{ event.boothCapacity }} 个摊位</span>
       </div>
-      <p class="small muted">撮合评分 = 双方期望品类（各 30 分）+ 年龄段契合（15）+ 价值区间契合（15）+ 到场时间重合（10）+ 双方已消毒（5）；≥ 40 分才生成组合，且不超过剩余摊位数。</p>
+      <p class="small muted">撮合评分 = 双方期望品类（各 30 分）+ 年龄段契合（15）+ 价值区间契合（15）+ 到场时间重合（10）+ 双方已消毒（5）；≥ 40 分才生成组合，且不超过剩余摊位数。强化复核期家庭不参与自动撮合。</p>
+    </div>
+
+    <div class="card">
+      <div class="card-title">🧊 冻结 / 回滚中的组合（{{ frozenMatches.length }} 组）</div>
+      <template v-if="frozenMatches.length">
+        <div v-for="m in frozenMatches" :key="m.id" class="match-row" style="border-color: #f2c6c6; background: #fff7f7">
+          <div class="row between wrap">
+            <div style="flex: 1; min-width: 260px">
+              <b>{{ itemName(m.itemAId) }}</b> 🔄 <b>{{ itemName(m.itemBId) }}</b>
+              <div class="tag-list mt8">
+                <span class="tag">问题物品：{{ problemName(m) }}</span>
+                <span class="tag">对方选择：{{ m.rollout ? ROLLOUT_META[m.rollout.choice].label : '待选择' }}</span>
+                <span class="tag">摊位：{{ m.booth ?? '已释放' }}</span>
+              </div>
+            </div>
+            <span class="badge red">{{ matchLabel(m.status) }}</span>
+          </div>
+          <div class="small muted mt8">处理入口：「异常处置」中现场复核、改约、补偿优先级或转人工调解。</div>
+        </div>
+      </template>
+      <EmptyState v-else icon="🧊" text="暂无冻结或回滚中的组合" />
     </div>
 
     <div class="card">
@@ -100,6 +125,7 @@ import ItemCard from '../../components/ItemCard.vue'
 import EmptyState from '../../components/EmptyState.vue'
 import { useAuthStore } from '../../stores/auth'
 import { useDataStore } from '../../stores/data'
+import { ROLLOUT_META } from '../../meta'
 import type { MatchStatus } from '../../types'
 
 const auth = useAuthStore()
@@ -113,20 +139,30 @@ const activeMatches = computed(() =>
 )
 const pendingMatches = activeMatches
 const confirmed = computed(() => data.matches.filter((m) => m.status === 'confirmed'))
+const frozenMatches = computed(() => data.matches.filter((m) => m.status === 'frozen' || m.status === 'waiting_replace'))
+const blockedFamilies = computed(() => data.users.filter((u) => u.role === 'parent' && u.autoMatchBlocked))
+const eligiblePool = computed(() =>
+  data.approvedPool.filter((i) => !data.familyAutoMatchBlocked(i.parentId)),
+)
 
 function itemName(id: string) {
   return data.itemById(id)?.name ?? '未知物品'
+}
+function problemName(m: { frozenItemId?: string }) {
+  return m.frozenItemId ? itemName(m.frozenItemId) : '—'
 }
 function matchLabel(s: MatchStatus) {
   return {
     proposed: '待双方确认', accepted_a: '一方已确认', accepted_b: '一方已确认',
     confirmed: '已预约', declined: '已拒绝', cancelled: '已取消', completed: '已完成', failed: '未成交',
+    frozen: '已冻结', waiting_replace: '等待替代物品',
   }[s]
 }
 function matchTone(s: MatchStatus) {
   return {
     proposed: 'purple', accepted_a: 'indigo', accepted_b: 'indigo',
     confirmed: 'blue', declined: 'red', cancelled: 'gray', completed: 'green', failed: 'red',
+    frozen: 'red', waiting_replace: 'amber',
   }[s]
 }
 

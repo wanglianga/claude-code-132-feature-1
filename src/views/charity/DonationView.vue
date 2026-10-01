@@ -10,6 +10,19 @@
     </div>
 
     <div class="card mt16">
+      <div class="card-title">🗳️ 公益转捐候选池（{{ data.donationCandidatePool.length }}）</div>
+      <p class="small muted mb12">
+        已到场但未成交、且家长已授权捐赠的物品会进入候选池；撮合冻结/等待替代期间暂不计入，取消或转入自由交换区后自动进入。
+      </p>
+      <div v-if="data.donationCandidatePool.length" class="tag-list">
+        <span v-for="i in data.donationCandidatePool" :key="i.id" class="tag">
+          {{ CATEGORY_META[i.category].icon }} {{ i.name }}（{{ data.userById(i.parentId)?.name }}）
+        </span>
+      </div>
+      <EmptyState v-else icon="🗳️" text="当前暂无符合条件的转捐候选物品" />
+    </div>
+
+    <div class="card mt16">
       <div class="card-title">📥 待处理捐赠申请（{{ requested.length }}）</div>
       <template v-if="requested.length">
         <div v-for="d in requested" :key="d.id" class="donation-row">

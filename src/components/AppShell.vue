@@ -67,9 +67,17 @@ const openIncidentCount = computed(() => data.openIncidents.length)
 const pendingCount = computed(() => data.pendingItems.length)
 const myIncidentCount = computed(() => {
   if (!auth.currentUser) return 0
-  return data.incidents.filter(
-    (i) => i.status !== 'resolved' && data.itemById(i.itemId)?.parentId === auth.currentUser!.id,
-  ).length
+  return data.incidents.filter((i) => {
+    if (i.status === 'resolved') return false
+    if (data.itemById(i.itemId)?.parentId === auth.currentUser!.id) return true
+    if (i.matchId) {
+      const m = data.matchById(i.matchId)
+      const a = m && data.itemById(m.itemAId)
+      const b = m && data.itemById(m.itemBId)
+      return a?.parentId === auth.currentUser!.id || b?.parentId === auth.currentUser!.id
+    }
+    return false
+  }).length
 })
 const requestedDonations = computed(
   () => data.donations.filter((d) => d.status === 'requested').length,

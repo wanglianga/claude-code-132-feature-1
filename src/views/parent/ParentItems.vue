@@ -8,13 +8,22 @@
       <router-link to="/parent/submit" class="btn primary">➕ 报名新物品</router-link>
     </div>
 
+    <div v-if="boothPriority > 0" class="notice info mb16">
+      ⭐ 您的家庭持有 <b>{{ boothPriority }}</b> 个摊位优先权重（社区对受影响交换的补偿），下一场活动将优先为您安排摊位与入场时段。
+    </div>
+
     <div v-if="myItems.length" class="grid cols-2">
-      <ItemCard v-for="item in myItems" :key="item.id" :item="item">
+      <div v-for="item in myItems" :key="item.id">
+      <ItemCard :item="item">
         <template #actions>
           <button class="btn sm outline" @click="detail = item">📋 流转详情</button>
           <router-link v-if="item.status === 'approved'" to="/parent/matches" class="btn sm primary">去撮合</router-link>
           <router-link v-if="item.status === 'matched'" to="/parent/matches" class="btn sm primary">确认撮合</router-link>
           <button v-if="item.status === 'reserved'" class="btn sm primary" @click="pass = item">🎫 入场凭证</button>
+          <button v-if="item.status === 'frozen'" class="btn sm danger" @click="$router.push('/parent/matches')">🧊 物品已冻结，去处理</button>
+          <button v-if="item.status === 'waiting_replace'" class="btn sm primary" @click="$router.push('/parent/matches')">⏳ 等待替代物品</button>
+          <button v-if="item.status === 'waiting_replace'" class="btn sm outline" @click="takeBack(item)">🎒 不想等了，自行带回</button>
+          <span v-if="item.status === 'verified' && item.booth" class="badge teal">已核销 · 摊位 {{ item.booth }}</span>
           <button v-if="item.status === 'disputed'" class="btn sm danger" @click="$router.push('/parent/incidents')">🛟 查看争议</button>
           <template v-if="item.status === 'no_exchange'">
             <button v-if="item.acceptDonation && !hasDonation(item.id)" class="btn sm success" @click="donate(item)">💚 申请转捐</button>
@@ -22,8 +31,12 @@
             <button class="btn sm outline" @click="takeBack(item)">🎒 自行带回</button>
           </template>
           <span v-if="item.status === 'free_zone'" class="badge slate">可在自由交换区现场交换</span>
+          <div v-if="item.intensiveReview" class="notice warn" style="flex-basis: 100%; margin: 2px 0 0">
+            📸 <b>强化照片复核</b>：请准备多角度照片与缺件/配件清单（该物品累计现场退回 {{ item.rejectCount ?? 0 }} 次）。
+          </div>
         </template>
       </ItemCard>
+      </div>
     </div>
     <div v-else class="card">
       <EmptyState icon="📦" text="还没有报名物品，点击右上角「报名新物品」开始吧">
@@ -54,6 +67,9 @@
         <div class="notice info mt16" style="text-align: left">
           温馨提示：请确保携带物品与报名照片一致、提前完成消毒；如无法到场请提前联系社区工作人员。
         </div>
+        <div v-if="pass.checkIn?.frozen" class="notice error mt8" style="text-align: left">
+          🧊 该凭证已因现场实物问题冻结，摊位与时段在社区复核期间暂停使用，处理方式请见「撮合中心」。
+        </div>
       </div>
     </div>
 
@@ -79,6 +95,7 @@ const detail = ref<Item | null>(null)
 const pass = ref<Item | null>(null)
 
 const myItems = computed(() => data.itemsByParent(auth.currentUser?.id ?? ''))
+const boothPriority = computed(() => auth.currentUser?.boothPriority ?? 0)
 
 function hasDonation(itemId: string) {
   return data.donations.some((d) => d.itemId === itemId && d.status !== 'declined')

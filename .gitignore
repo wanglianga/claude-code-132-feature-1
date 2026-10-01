@@ -27,10 +27,19 @@ temp/
 *.log
 *.sqlite
 *.db
-*screenshot*
-*screen-capture*
-*recording*
-*trace*
-*debug*
-*temp*
-*tmp*
+
+# 必需组件：文件名含 "temp" 子串被上方 *temp* 误伤，显式放行
+!src/components/ItemPhoto.vue
+.local/*.tar
+.local/*.tar.gz
+.local/*.tgz
+.local/*.zip
+.local/*.7z
+*screenshot*.png
+*screenshot*.jpg
+*screenshot*.jpeg
+*screen-capture*.png
+*screen-capture*.jpg
+*recording*.webm
+*recording*.mp4
+*trace*.jsonl

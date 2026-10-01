@@ -1,0 +1,8 @@
+services:
+  swapmeet-web:
+    build: .
+    image: community-swap-meet:latest
+    container_name: community-swap-meet
+    ports:
+      - "8080:80"
+    restart: unless-stopped
